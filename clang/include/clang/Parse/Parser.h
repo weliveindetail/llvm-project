@@ -429,8 +429,11 @@ class Parser : public CodeCompletionHandler {
   /// a statement expression and builds a suitable expression statement.
   StmtResult handleExprStmt(ExprResult E, ParsedStmtContext StmtCtx);
 
+  bool IsTemporary;
+
 public:
-  Parser(Preprocessor &PP, Sema &Actions, bool SkipFunctionBodies);
+  Parser(Preprocessor &PP, Sema &Actions, bool SkipFunctionBodies, 
+         bool isTemp = false);
   ~Parser() override;
 
   const LangOptions &getLangOpts() const { return PP.getLangOpts(); }
@@ -440,6 +443,34 @@ public:
   AttributeFactory &getAttrFactory() { return AttrFactory; }
 
   const Token &getCurToken() const { return Tok; }
+
+  /// A RAII object to temporarily reset PP's state and restore it.
+  class ParserCurTokRestoreRAII {
+  private:
+    Parser &P;
+    Token SavedTok;
+
+  public:
+    ParserCurTokRestoreRAII(Parser &P)
+      : P(P), SavedTok(P.Tok) 
+    {
+    }
+
+    void pop() {
+      if (SavedTok.is(tok::unknown))
+        return;
+
+      P.Tok = SavedTok;
+      
+      SavedTok.startToken();
+    }
+
+    ~ParserCurTokRestoreRAII() {
+      pop();
+    }
+  };
+
+
   Scope *getCurScope() const { return Actions.getCurScope(); }
   void incrementMSManglingNumber() const {
     return Actions.incrementMSManglingNumber();
@@ -1171,7 +1202,7 @@ public:
     return Diag(Tok, DiagID);
   }
 
-private:
+protected:
   void SuggestParentheses(SourceLocation Loc, unsigned DK,
                           SourceRange ParenRange);
   void CheckNestedObjCContexts(SourceLocation AtLoc);
