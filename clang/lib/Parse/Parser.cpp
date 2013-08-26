@@ -47,15 +47,17 @@ IdentifierInfo *Parser::getSEHExceptKeyword() {
   return Ident__except;
 }
 
-Parser::Parser(Preprocessor &pp, Sema &actions, bool skipFunctionBodies)
+Parser::Parser(Preprocessor &pp, Sema &actions, bool skipFunctionBodies,
+               bool isTemporary /*=false*/)
   : PP(pp), Actions(actions), Diags(PP.getDiagnostics()),
     GreaterThanIsOperator(true), ColonIsSacred(false),
     InMessageExpression(false), TemplateParameterDepth(0),
-    ParsingInObjCContainer(false) {
+    ParsingInObjCContainer(false), IsTemporary(isTemporary) {
   SkipFunctionBodies = pp.isCodeCompletionEnabled() || skipFunctionBodies;
   Tok.startToken();
   Tok.setKind(tok::eof);
-  Actions.CurScope = nullptr;
+  if (!IsTemporary)
+    Actions.CurScope = nullptr;
   NumCachedScopes = 0;
   CurParsedObjCImpl = nullptr;
 
@@ -64,9 +66,11 @@ Parser::Parser(Preprocessor &pp, Sema &actions, bool skipFunctionBodies)
   initializePragmaHandlers();
 
   CommentSemaHandler.reset(new ActionCommentHandler(actions));
-  PP.addCommentHandler(CommentSemaHandler.get());
+  if (!IsTemporary)
+    PP.addCommentHandler(CommentSemaHandler.get());
 
-  PP.setCodeCompletionHandler(*this);
+  if (!IsTemporary)
+    PP.setCodeCompletionHandler(*this);
 }
 
 DiagnosticBuilder Parser::Diag(SourceLocation Loc, unsigned DiagID) {
@@ -415,8 +419,10 @@ Parser::ParseScopeFlags::~ParseScopeFlags() {
 
 Parser::~Parser() {
   // If we still have scopes active, delete the scope tree.
+  if (!IsTemporary) {
   delete getCurScope();
   Actions.CurScope = nullptr;
+  }
 
   // Free the scope cache.
   for (unsigned i = 0, e = NumCachedScopes; i != e; ++i)
@@ -537,7 +543,7 @@ void Parser::LateTemplateParserCleanupCallback(void *P) {
   // While this RAII helper doesn't bracket any actual work, the destructor will
   // clean up annotations that were created during ActOnEndOfTranslationUnit
   // when incremental processing is enabled.
-  DestroyTemplateIdAnnotationsRAIIObj CleanupRAII(((Parser *)P)->TemplateIds);
+   DestroyTemplateIdAnnotationsRAIIObj CleanupRAII(*(Parser*)P);
 }
 
 /// Parse the first top-level declaration in a translation unit.
@@ -572,7 +578,7 @@ bool Parser::ParseFirstTopLevelDecl(DeclGroupPtrTy &Result) {
 ///           declaration
 /// [C++20]   module-import-declaration
 bool Parser::ParseTopLevelDecl(DeclGroupPtrTy &Result, bool IsFirstDecl) {
-  DestroyTemplateIdAnnotationsRAIIObj CleanupRAII(TemplateIds);
+  DestroyTemplateIdAnnotationsRAIIObj CleanupRAII(*this);
 
   // Skip over the EOF token, flagging end of previous input for incremental
   // processing
@@ -652,9 +658,8 @@ bool Parser::ParseTopLevelDecl(DeclGroupPtrTy &Result, bool IsFirstDecl) {
                                     PP.isIncrementalProcessingEnabled() ?
                                     LateTemplateParserCleanupCallback : nullptr,
                                     this);
-    if (!PP.isIncrementalProcessingEnabled())
-      Actions.ActOnEndOfTranslationUnit();
-    //else don't tell Sema that we ended parsing: more input might come.
+    Actions.ActOnEndOfTranslationUnit();
+
     return true;
 
   case tok::identifier:
@@ -712,7 +717,7 @@ bool Parser::ParseTopLevelDecl(DeclGroupPtrTy &Result, bool IsFirstDecl) {
 Parser::DeclGroupPtrTy
 Parser::ParseExternalDeclaration(ParsedAttributesWithRange &attrs,
                                  ParsingDeclSpec *DS) {
-  DestroyTemplateIdAnnotationsRAIIObj CleanupRAII(TemplateIds);
+  DestroyTemplateIdAnnotationsRAIIObj CleanupRAII(*this);
   ParenBraceBracketBalancer BalancerRAIIObj(*this);
 
   if (PP.isCodeCompletionReached()) {
