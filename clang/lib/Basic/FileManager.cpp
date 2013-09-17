@@ -172,14 +172,30 @@ const FileEntry *FileManager::getFile(StringRef Filename, bool openFile,
                                       bool CacheFailure) {
   ++NumFileLookups;
 
-  // See if there is already an entry in the map.
   auto SeenFileInsertResult = SeenFileEntries.insert({Filename, nullptr});
-  if (!SeenFileInsertResult.second)
+
+  auto &NamedFileEnt = *SeenFileInsertResult.first;
+
+  const FileEntry *StaleFileEntry = 0;
+  bool needsRereading = false;
+  if (NamedFileEnt.getValue()) {
+    std::set<const FileEntry*>::const_iterator found
+      = FileEntriesToReread.find(NamedFileEnt.getValue());
+    if (found != FileEntriesToReread.end()) {
+      needsRereading = true;
+      StaleFileEntry = NamedFileEnt.getValue();
+      FileEntriesToReread.erase(found);
+      // Avoid the assert below.
+      NamedFileEnt.second = nullptr;
+    }
+  }
+
+  // See if there is already an entry in the map.
+  if (!SeenFileInsertResult.second && !needsRereading)
     return SeenFileInsertResult.first->second;
 
   // We've not seen this before. Fill it in.
   ++NumFileCacheMisses;
-  auto &NamedFileEnt = *SeenFileInsertResult.first;
   assert(!NamedFileEnt.second && "should be newly-created");
 
   // Get the null-terminated file name as stored as the key of the
@@ -270,6 +286,15 @@ const FileEntry *FileManager::getFile(StringRef Filename, bool openFile,
   } else if (!openFile) {
     // We should still fill the path even if we aren't opening the file.
     fillRealPathName(&UFE, InterndFileName);
+  }
+
+  if (StaleFileEntry) {
+    // Find occurrences of old FileEntry; update with new one:
+    for (auto& fe: SeenFileEntries) {
+      if (fe.getValue() == StaleFileEntry) {
+        fe.setValue(&UFE);
+      }
+    }
   }
   return &UFE;
 }
@@ -453,16 +478,7 @@ bool FileManager::getNoncachedStatValue(StringRef Path,
 
 void FileManager::invalidateCache(const FileEntry *Entry) {
   assert(Entry && "Cannot invalidate a NULL FileEntry");
-
-  SeenFileEntries.erase(Entry->getName());
-
-  // FileEntry invalidation should not block future optimizations in the file
-  // caches. Possible alternatives are cache truncation (invalidate last N) or
-  // invalidation of the whole cache.
-  //
-  // FIXME: This is broken. We sometimes have the same FileEntry* shared
-  // betweeen multiple SeenFileEntries, so this can leave dangling pointers.
-  UniqueRealFiles.erase(Entry->getUniqueID());
+  FileEntriesToReread.insert(Entry);
 }
 
 void FileManager::GetUniqueIDMapping(
