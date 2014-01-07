@@ -258,6 +258,9 @@ const FileEntry *FileManager::getFile(StringRef Filename, bool openFile,
     // multiple names.
     if (DirInfo != UFE.Dir && Status.IsVFSMapped)
       UFE.Dir = DirInfo;
+  }
+  if (UFE.isValid() &&
+      llvm::sys::toTimeT(Status.getLastModificationTime()) == UFE.ModTime) {
 
     // Always update the name to use the last name by which a file was accessed.
     // FIXME: Neither this nor always using the first name is correct; we want
