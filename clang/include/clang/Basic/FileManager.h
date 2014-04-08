@@ -407,7 +407,7 @@ public:
                                         llvm::vfs::Status &Result);
 
   /// Remove the real file \p Entry from the cache.
-  void invalidateCache(const FileEntry *Entry);
+  void invalidateCache(FileEntry *Entry);
 
   /// If path is not absolute and FileSystemOptions set the working
   /// directory, the path is modified to be relative to the given
