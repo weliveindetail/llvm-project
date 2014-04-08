@@ -202,8 +202,13 @@ ModuleManager::addModule(StringRef FileName, ModuleKind Type,
   // Read the signature eagerly now so that we can check it.  Avoid calling
   // ReadSignature unless there's something to check though.
   if (ExpectedSignature && checkSignature(ReadSignature(NewModule->Data),
-                                          ExpectedSignature, ErrorStr))
+                                          ExpectedSignature, ErrorStr)) {
+    // Try to remove the buffer.  If it can't be removed, then it was already
+    // validated by this process.
+    if (!getModuleCache().tryToDropPCM(NewModule->FileName))
+      FileMgr.invalidateCache(const_cast<FileEntry*>(NewModule->File));
     return OutOfDate;
+  }
 
   // We're keeping this module.  Store it everywhere.
   Module = Modules[Entry] = NewModule.get();
@@ -255,6 +260,7 @@ void ModuleManager::removeModules(ModuleIterator First, ModuleMap *modMap) {
   for (ModuleIterator victim = First; victim != Last; ++victim) {
     Modules.erase(victim->File);
 
+    FileMgr.invalidateCache(const_cast<FileEntry*>(victim->File));
     if (modMap) {
       StringRef ModuleName = victim->ModuleName;
       if (Module *mod = modMap->findModule(ModuleName)) {
