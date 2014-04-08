@@ -381,12 +381,23 @@ void SourceManager::clearIDTables() {
   createExpansionLoc(SourceLocation(), SourceLocation(), SourceLocation(), 1);
 }
 
-void SourceManager::invalidateCache(const FileEntry* Entry) {
+void SourceManager::invalidateCache(FileID FID) {
+  const FileEntry* Entry = getFileEntryForID(FID);
+  if (!Entry)
+    return;
   if (ContentCache *&E = FileInfos[Entry]) {
     E->replaceBuffer(0, /*free*/ true);
     E = 0;
   }
-  getFileManager().invalidateCache(Entry);
+  if (!FID.isInvalid()) {
+    const SrcMgr::SLocEntry& SLocE = getSLocEntry(FID);
+    if (SLocE.isFile()) {
+      SrcMgr::ContentCache* CC =
+        const_cast<SrcMgr::ContentCache*>(SLocE.getFile().getContentCache());
+      CC->replaceBuffer(0, /*free*/true);
+    }
+  }
+  getFileManager().invalidateCache(const_cast<FileEntry*>(Entry));
 }
 
 void SourceManager::initializeForReplay(const SourceManager &Old) {
