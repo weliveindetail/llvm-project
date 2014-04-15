@@ -402,7 +402,8 @@ public:
       SmallVectorImpl<char> *SearchPath, SmallVectorImpl<char> *RelativePath,
       Module *RequestingModule, ModuleMap::KnownHeader *SuggestedModule,
       bool *IsMapped, bool *IsFrameworkFound, bool SkipCache = false,
-      bool BuildSystemModule = false);
+      bool BuildSystemModule = false, bool OpenFile = true,
+      bool CacheFailures = true);
 
   /// Look up a subframework for the specified \#include file.
   ///
@@ -653,7 +654,8 @@ private:
   getFileAndSuggestModule(StringRef FileName, SourceLocation IncludeLoc,
                           const DirectoryEntry *Dir, bool IsSystemHeaderDir,
                           Module *RequestingModule,
-                          ModuleMap::KnownHeader *SuggestedModule);
+                          ModuleMap::KnownHeader *SuggestedModule,
+                          bool OpenFile = true, bool CacheFailures = true);
 
 public:
   /// Retrieve the module map.
