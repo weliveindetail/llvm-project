@@ -185,7 +185,8 @@ public:
                               bool &InUserSpecifiedSystemFramework,
                               bool &IsFrameworkFound,
                               bool &HasBeenMapped,
-                              SmallVectorImpl<char> &MappedName) const;
+                              SmallVectorImpl<char> &MappedName,
+                              bool OpenFile = true) const;
 
 private:
   const FileEntry *DoFrameworkLookup(
