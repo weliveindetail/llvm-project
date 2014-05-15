@@ -353,7 +353,8 @@ Optional<FileEntryRef> DirectoryLookup::LookupFile(
     SmallVectorImpl<char> *SearchPath, SmallVectorImpl<char> *RelativePath,
     Module *RequestingModule, ModuleMap::KnownHeader *SuggestedModule,
     bool &InUserSpecifiedSystemFramework, bool &IsFrameworkFound,
-    bool &IsInHeaderMap, SmallVectorImpl<char> &MappedName) const {
+    bool &IsInHeaderMap, SmallVectorImpl<char> &MappedName,
+    bool OpenFile) const {
   InUserSpecifiedSystemFramework = false;
   IsInHeaderMap = false;
   MappedName.clear();
@@ -375,7 +376,8 @@ Optional<FileEntryRef> DirectoryLookup::LookupFile(
 
     return HS.getFileAndSuggestModule(TmpDir, IncludeLoc, getDir(),
                                       isSystemHeaderDirectory(),
-                                      RequestingModule, SuggestedModule);
+                                      RequestingModule, SuggestedModule,
+                                      OpenFile);
   }
 
   if (isFramework())
@@ -415,7 +417,7 @@ Optional<FileEntryRef> DirectoryLookup::LookupFile(
       FixupSearchPath();
       return *Result;
     }
-  } else if (auto Res = HS.getFileMgr().getOptionalFileRef(Dest)) {
+  } else if (auto Res = HS.getFileMgr().getOptionalFileRef(Dest, OpenFile)) {
     FixupSearchPath();
     return *Res;
   }
@@ -903,7 +905,7 @@ Optional<FileEntryRef> HeaderSearch::LookupFile(
     Optional<FileEntryRef> File = SearchDirs[i].LookupFile(
         Filename, *this, IncludeLoc, SearchPath, RelativePath, RequestingModule,
         SuggestedModule, InUserSpecifiedSystemFramework, IsFrameworkFoundInDir,
-        IsInHeaderMap, MappedName);
+        IsInHeaderMap, MappedName, OpenFile);
     if (!MappedName.empty()) {
       assert(IsInHeaderMap && "MappedName should come from a header map");
       CacheLookup.MappedName =
