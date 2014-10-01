@@ -127,7 +127,7 @@ public:
 
 Sema::Sema(Preprocessor &pp, ASTContext &ctxt, ASTConsumer &consumer,
            TranslationUnitKind TUKind, CodeCompleteConsumer *CodeCompleter)
-    : ExternalSource(nullptr), isMultiplexExternalSource(false),
+    : ExternalSource(nullptr),
       FPFeatures(pp.getLangOpts()), LangOpts(pp.getLangOpts()), PP(pp),
       Context(ctxt), Consumer(consumer), Diags(PP.getDiagnostics()),
       SourceMgr(PP.getSourceManager()), CollectStats(false),
@@ -364,10 +364,6 @@ Sema::~Sema() {
         = dyn_cast_or_null<ExternalSemaSource>(Context.getExternalSource()))
     ExternalSema->ForgetSema();
 
-  // If Sema's ExternalSource is the multiplexer - we own it.
-  if (isMultiplexExternalSource)
-    delete ExternalSource;
-
   threadSafety::threadSafetyCleanup(ThreadSafetyDeclCache);
 
   // Destroys data sharing attributes stack for OpenMP
@@ -422,11 +418,12 @@ void Sema::addExternalSource(ExternalSemaSource *E) {
     return;
   }
 
-  if (isMultiplexExternalSource)
-    static_cast<MultiplexExternalSemaSource*>(ExternalSource)->addSource(*E);
+  if (MultiplexExternalSource.get())
+    MultiplexExternalSource->addSource(*E);
   else {
-    ExternalSource = new MultiplexExternalSemaSource(*ExternalSource, *E);
-    isMultiplexExternalSource = true;
+    MultiplexExternalSource
+      = new MultiplexExternalSemaSource(*ExternalSource, *E);
+    ExternalSource = MultiplexExternalSource.get();
   }
 }
 
