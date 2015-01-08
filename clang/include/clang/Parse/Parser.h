@@ -39,6 +39,7 @@ namespace clang {
   class DiagnosticBuilder;
   struct LoopHint;
   class Parser;
+  class ParserStateRAII;
   class ParsingDeclRAIIObject;
   class ParsingDeclSpec;
   class ParsingDeclarator;
@@ -64,6 +65,7 @@ class Parser : public CodeCompletionHandler {
   friend class ParenBraceBracketBalancer;
   friend class BalancedDelimiterTracker;
   friend class DestroyTemplateIdAnnotationsRAIIObj;
+  friend class ParserStateRAII;
 
   Preprocessor &PP;
 
