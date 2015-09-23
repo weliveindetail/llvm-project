@@ -2849,7 +2849,9 @@ Sema::InstantiateClass(SourceLocation PointOfInstantiation,
   // Exit the scope of this instantiation.
   SavedContext.pop();
 
-  if (!Instantiation->isInvalidDecl()) {
+  if (Instantiation->isInvalidDecl()) {
+    Consumer.HandleInvalidTagDeclDefinition(Instantiation);
+  } else {
     // Always emit the vtable for an explicit instantiation definition
     // of a polymorphic class template specialization. Otherwise, eagerly
     // instantiate only constexpr virtual functions in preparation for their use
