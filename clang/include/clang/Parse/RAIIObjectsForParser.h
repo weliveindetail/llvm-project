@@ -451,6 +451,9 @@ namespace clang {
         SmallVectorImpl<TemplateIdAnnotation *> &Container)
         : Container(Container) {}
 
+    DestroyTemplateIdAnnotationsRAIIObj(Parser& P)
+        : Container(P.TemplateIds) {}
+
     ~DestroyTemplateIdAnnotationsRAIIObj() {
       for (SmallVectorImpl<TemplateIdAnnotation *>::iterator I =
                Container.begin(),
