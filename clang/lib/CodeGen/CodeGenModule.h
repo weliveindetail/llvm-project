@@ -36,6 +36,8 @@
 #include "llvm/IR/ValueHandle.h"
 #include "llvm/Transforms/Utils/SanitizerStats.h"
 
+#include <unordered_map>
+
 namespace llvm {
 class Module;
 class Constant;
@@ -347,7 +349,11 @@ private:
   }
 
   /// Enables unloading of emitted symbols that need to become deferred.
-  llvm::StringMap<GlobalDecl> EmittedDeferredDecls;
+  /// Key is the emitted definition, value is symbol name + Decl created
+  /// while marking this deferred, i.e. the content of DeferredDecls.
+  std::unordered_map<llvm::GlobalValue*,
+                     std::pair<llvm::StringRef, GlobalDecl>>
+    EmittedDeferredDecls;
 
 
   /// List of alias we have emitted. Used to make sure that what they point to
