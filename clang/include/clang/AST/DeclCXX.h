@@ -306,7 +306,7 @@ class CXXRecordDecl : public RecordDecl {
   friend class ASTWriter;
   friend class DeclContext;
   friend class LambdaExpr;
-  friend class DeclUnloader;
+  friend class ::cling::DeclUnloader;
 
   friend void FunctionDecl::setPure(bool);
   friend void TagDecl::startDefinition();
