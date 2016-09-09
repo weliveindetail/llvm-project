@@ -2174,7 +2174,6 @@ void CodeGenModule::EmitDeferred() {
 
     // Otherwise, emit the definition and move on to the next one.
     EmitGlobalDefinition(D, GV);
-    EmittedDeferredDecls[GV->getName()] = D;
 
     // If we found out that we need to emit more decls, do that recursively.
     // This has the advantage that the decls are emitted in a DFS and related
@@ -3279,6 +3278,7 @@ llvm::Constant *CodeGenModule::GetOrCreateLLVMFunction(
       // DeferredDeclsToEmit list, and remove it from DeferredDecls (since we
       // don't need it anymore).
       addDeferredDeclToEmit(DDI->second);
+      EmittedDeferredDecls[F] = std::make_pair(DDI->first, DDI->second);
       DeferredDecls.erase(DDI);
 
       // Otherwise, there are cases we have to worry about where we're
@@ -3539,6 +3539,7 @@ CodeGenModule::GetOrCreateLLVMGlobal(StringRef MangledName,
     // Move the potentially referenced deferred decl to the DeferredDeclsToEmit
     // list, and remove it from DeferredDecls (since we don't need it anymore).
     addDeferredDeclToEmit(DDI->second);
+    EmittedDeferredDecls[GV] = std::make_pair(DDI->first, DDI->second);
     DeferredDecls.erase(DDI);
   }
 
