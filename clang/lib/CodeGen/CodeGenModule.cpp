@@ -3149,7 +3149,7 @@ llvm::Constant *CodeGenModule::GetOrCreateLLVMFunction(
       // don't need it anymore).
       addDeferredDeclToEmit(DDI->second);
       EmittedDeferredDecls[F] = std::make_pair(DDI->first, DDI->second);
-      DeferredDecls.erase(DDI);
+      //DeferredDecls.erase(DDI);
 
       // Otherwise, there are cases we have to worry about where we're
       // using a declaration for which we must emit a definition but where
@@ -3404,7 +3404,7 @@ CodeGenModule::GetOrCreateLLVMGlobal(StringRef MangledName,
     // list, and remove it from DeferredDecls (since we don't need it anymore).
     addDeferredDeclToEmit(DDI->second);
     EmittedDeferredDecls[GV] = std::make_pair(DDI->first, DDI->second);
-    DeferredDecls.erase(DDI);
+    //DeferredDecls.erase(DDI);
   }
 
   // Handle things which are present even on external declarations.
