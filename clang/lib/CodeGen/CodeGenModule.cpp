@@ -475,6 +475,9 @@ static void setVisibilityFromDLLStorageClass(const clang::LangOptions &LO,
 
 void CodeGenModule::Release() {
   EmitDeferred();
+  DeferredDecls.insert(EmittedDeferredDecls.begin(),
+                       EmittedDeferredDecls.end());
+  EmittedDeferredDecls.clear();
   EmitVTablesOpportunistically();
   applyGlobalValReplacements();
   applyReplacements();
@@ -3010,11 +3013,13 @@ void CodeGenModule::EmitGlobal(GlobalDecl GD) {
   StringRef MangledName = getMangledName(GD);
   if (GetGlobalValue(MangledName) != nullptr) {
     // The value has already been used and should therefore be emitted.
-    addDeferredDeclToEmit(GD);
+    addDeferredDeclToEmit(GV, GD);
+    EmittedDeferredDecls[MangledName] = GD;
   } else if (MustBeEmitted(Global)) {
     // The value must be emitted, but cannot be emitted eagerly.
     assert(!MayBeEmittedEagerly(Global));
-    addDeferredDeclToEmit(GD);
+    addDeferredDeclToEmit(/*GV=*/nullptr, GD);
+    EmittedDeferredDecls[MangledName] = GD;
   } else {
     // Otherwise, remember that we saw a deferred decl with this name.  The
     // first use of the mangled name will cause it to move into
@@ -3651,9 +3656,9 @@ llvm::Constant *CodeGenModule::GetOrCreateLLVMFunction(
       // Move the potentially referenced deferred decl to the
       // DeferredDeclsToEmit list, and remove it from DeferredDecls (since we
       // don't need it anymore).
-      addDeferredDeclToEmit(DDI->second);
-      EmittedDeferredDecls[F] = std::make_pair(DDI->first, DDI->second);
-      //DeferredDecls.erase(DDI);
+      addDeferredDeclToEmit(F, DDI->second);
+      EmittedDeferredDecls[DDI->first] = DDI->second;
+      DeferredDecls.erase(DDI);
 
       // Otherwise, there are cases we have to worry about where we're
       // using a declaration for which we must emit a definition but where
@@ -3925,9 +3930,9 @@ CodeGenModule::GetOrCreateLLVMGlobal(StringRef MangledName, llvm::Type *Ty,
   if (DDI != DeferredDecls.end()) {
     // Move the potentially referenced deferred decl to the DeferredDeclsToEmit
     // list, and remove it from DeferredDecls (since we don't need it anymore).
-    addDeferredDeclToEmit(DDI->second);
-    EmittedDeferredDecls[GV] = std::make_pair(DDI->first, DDI->second);
-    //DeferredDecls.erase(DDI);
+    addDeferredDeclToEmit(GV, DDI->second);
+    EmittedDeferredDecls[DDI->first] = DDI->second;
+    DeferredDecls.erase(DDI);
   }
 
   // Handle things which are present even on external declarations.
