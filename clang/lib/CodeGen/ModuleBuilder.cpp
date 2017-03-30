@@ -292,8 +292,7 @@ namespace clang {
       }
     }
 
-    void forgetDecl(const GlobalDecl& GD) {
-      StringRef MangledName = Builder->getMangledName(GD);
+    void forgetDecl(const GlobalDecl& GD, llvm::StringRef MangledName) {
       Builder->DeferredDecls.erase(MangledName);
     }
 
@@ -500,8 +499,9 @@ void CodeGenerator::forgetGlobal(llvm::GlobalValue* GV) {
   static_cast<CodeGeneratorImpl*>(this)->forgetGlobal(GV);
 }
 
-void CodeGenerator::forgetDecl(const GlobalDecl& GD) {
-  static_cast<CodeGeneratorImpl*>(this)->forgetDecl(GD);
+void CodeGenerator::forgetDecl(const GlobalDecl& GD,
+                               llvm::StringRef MangledName) {
+  static_cast<CodeGeneratorImpl*>(this)->forgetDecl(GD, MangledName);
 }
 
 
