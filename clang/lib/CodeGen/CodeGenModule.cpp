@@ -374,6 +374,7 @@ void CodeGenModule::checkAliases() {
 
 void CodeGenModule::clear() {
   DeferredDeclsToEmit.clear();
+  EmittedDeferredDecls.clear();
   if (OpenMPRuntime)
     OpenMPRuntime->clear();
 }
