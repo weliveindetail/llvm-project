@@ -1389,8 +1389,13 @@ unsigned SourceManager::getLineNumber(FileID FID, unsigned FilePos,
   // If this is the first use of line information for this buffer, compute the
   /// SourceLineCache for it on demand.
   if (!Content->SourceLineCache) {
-    llvm::Optional<llvm::MemoryBufferRef> Buffer =
-        Content->getBufferOrNone(Diag, getFileManager(), SourceLocation());
+
+    llvm::Optional<llvm::MemoryBufferRef> Buffer;
+    if (isFileOverridden(FI->ContentsEntry))
+      Buffer = getMemoryBufferForFileOrNone(FI->ContentsEntry);
+    else
+      Buffer =
+          Content->getBufferOrNone(Diag, getFileManager(), SourceLocation());
     if (Invalid)
       *Invalid = !Buffer;
     if (!Buffer)
