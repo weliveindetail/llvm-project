@@ -531,6 +531,15 @@ static bool ParseDirective(StringRef S, ExpectedData *ED, SourceManager &SM,
         Optional<FileEntryRef> File =
             PP->LookupFile(Pos, Filename, false, nullptr, nullptr, CurDir,
                            nullptr, nullptr, nullptr, nullptr, nullptr);
+
+        // Check if the file was virtual
+        if (!File) {
+          if (auto FR = SM.getFileManager().getFileRef(Filename))
+            File = *FR;
+          else
+            consumeError(FR.takeError());
+        }
+
         if (!File) {
           Diags.Report(Pos.getLocWithOffset(PH.C-PH.Begin),
                        diag::err_verify_missing_file) << Filename << KindStr;
