@@ -1245,9 +1245,15 @@ ComputeLineNumbers(DiagnosticsEngine &Diag, ContentCache *FI,
 static void ComputeLineNumbers(DiagnosticsEngine &Diag, ContentCache *FI,
                                llvm::BumpPtrAllocator &Alloc,
                                const SourceManager &SM, bool &Invalid) {
-  // Note that calling 'getBuffer()' may lazily page in the file.
-  const MemoryBuffer *Buffer =
-      FI->getBuffer(Diag, SM, SourceLocation(), &Invalid);
+  const MemoryBuffer *Buffer = nullptr;
+  if (SM.isFileOverridden(FI->ContentsEntry))
+    Buffer
+      = const_cast<SourceManager&>(SM).getMemoryBufferForFile(FI->ContentsEntry,
+                                                              &Invalid);
+  else
+    // Note that calling 'getBuffer()' may lazily page in the file.
+    Buffer = FI->getBuffer(Diag, SM, SourceLocation(), &Invalid);
+
   if (Invalid)
     return;
 
