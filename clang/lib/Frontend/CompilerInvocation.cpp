@@ -3979,9 +3979,10 @@ IntrusiveRefCntPtr<llvm::vfs::FileSystem> createVFSFromCompilerInvocation(
     const CompilerInvocation &CI, DiagnosticsEngine &Diags,
     IntrusiveRefCntPtr<llvm::vfs::FileSystem> BaseFS) {
   if (CI.getHeaderSearchOpts().VFSOverlayFiles.empty())
-    return BaseFS;
+    return CI.getOverlay();
 
   IntrusiveRefCntPtr<llvm::vfs::FileSystem> Result = BaseFS;
+
   // earlier vfs files are on the bottom
   for (const auto &File : CI.getHeaderSearchOpts().VFSOverlayFiles) {
     llvm::ErrorOr<std::unique_ptr<llvm::MemoryBuffer>> Buffer =
@@ -3999,9 +4000,9 @@ IntrusiveRefCntPtr<llvm::vfs::FileSystem> createVFSFromCompilerInvocation(
       continue;
     }
 
-    Result = FS;
+    CI.getOverlay()->pushOverlay(FS);
   }
-  return Result;
+  return CI.getOverlay();
 }
 
 } // namespace clang
