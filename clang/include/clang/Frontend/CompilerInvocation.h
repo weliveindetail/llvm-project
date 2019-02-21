@@ -22,6 +22,7 @@
 #include "clang/StaticAnalyzer/Core/AnalyzerOptions.h"
 #include "llvm/ADT/IntrusiveRefCntPtr.h"
 #include "llvm/ADT/ArrayRef.h"
+#include "llvm/Support/VirtualFileSystem.h"
 #include <memory>
 #include <string>
 
@@ -139,8 +140,12 @@ class CompilerInvocation : public CompilerInvocationBase {
   /// Options controlling preprocessed output.
   PreprocessorOutputOptions PreprocessorOutputOpts;
 
+  /// List of overlay files
+  IntrusiveRefCntPtr<llvm::vfs::OverlayFileSystem> Overlay;
+
 public:
-  CompilerInvocation() : AnalyzerOpts(new AnalyzerOptions()) {}
+  CompilerInvocation() : AnalyzerOpts(new AnalyzerOptions()),
+    Overlay(new llvm::vfs::OverlayFileSystem(llvm::vfs::getRealFileSystem())) {}
 
   /// @name Utility Methods
   /// @{
@@ -202,6 +207,18 @@ public:
 
   const DependencyOutputOptions &getDependencyOutputOpts() const {
     return DependencyOutputOpts;
+  }
+
+  void addOverlay(const IntrusiveRefCntPtr<llvm::vfs::FileSystem>& FS) {
+    Overlay->pushOverlay(FS);
+  }
+
+  IntrusiveRefCntPtr<llvm::vfs::OverlayFileSystem> &getOverlay() {
+    return Overlay;
+  }
+
+  const IntrusiveRefCntPtr<llvm::vfs::OverlayFileSystem> &getOverlay() const {
+    return Overlay;
   }
 
   FileSystemOptions &getFileSystemOpts() { return FileSystemOpts; }
