@@ -1,0 +1,10 @@
+image: weliveindetail/llvm-project:kaleidoscope
+workspaceLocation: llvm-project/llvm
+
+tasks:
+  - init: ([ ! "${source+1}" ] || gp open "/workspace/llvm-project/${source}") && ([ ! "${example+1}" ] || (CC=clang CXX=clang++ cmake -G Ninja -S /workspace/llvm-project/llvm -B /workspace/llvm-project/build -DLLVM_TARGETS_TO_BUILD=host -DLLVM_USE_LINKER=lld && cd /workspace/llvm-project/build && ninja "${example}" && "bin/${example}"))
+
+vscode:
+  extensions:
+    - vadimcn.vscode-lldb@1.4.3:1x1ecmrxqDVofzxcg1Pe1A==
+    - ms-vscode.cpptools@0.26.2:Pq/tmf2WN3SanVzB4xZc1g==
