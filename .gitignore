@@ -26,6 +26,7 @@
 
 .cache
 llvm/tools/cling
+llvm/tools/clang
 
 # Nested build directory
 /build*
