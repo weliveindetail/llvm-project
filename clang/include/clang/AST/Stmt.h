@@ -131,7 +131,8 @@ protected:
 
     unsigned : NumStmtBits;
 
-    unsigned NumStmts : 32 - NumStmtBits;
+    unsigned WasReplaced : 1;
+    unsigned NumStmts : 32 - (NumStmtBits + 1);
 
     /// The location of the opening "{".
     SourceLocation LBraceLoc;
@@ -1328,6 +1329,7 @@ public:
   explicit CompoundStmt(SourceLocation Loc)
       : Stmt(CompoundStmtClass), RBraceLoc(Loc) {
     CompoundStmtBits.NumStmts = 0;
+    CompoundStmtBits.WasReplaced = 0;
     CompoundStmtBits.LBraceLoc = Loc;
   }
 
@@ -1341,7 +1343,10 @@ public:
   using body_range = llvm::iterator_range<body_iterator>;
 
   body_range body() { return body_range(body_begin(), body_end()); }
-  body_iterator body_begin() { return getTrailingObjects<Stmt *>(); }
+  body_iterator body_begin() {
+    Stmt** begin = getTrailingObjects<Stmt *>();
+    return !CompoundStmtBits.WasReplaced ? begin : (body_iterator)begin[0];
+  }
   body_iterator body_end() { return body_begin() + size(); }
   Stmt *body_front() { return !body_empty() ? body_begin()[0] : nullptr; }
 
@@ -1357,7 +1362,7 @@ public:
   }
 
   const_body_iterator body_begin() const {
-    return getTrailingObjects<Stmt *>();
+    return const_cast<CompoundStmt*>(this)->body_begin();
   }
 
   const_body_iterator body_end() const { return body_begin() + size(); }
@@ -1390,6 +1395,8 @@ public:
   const_reverse_body_iterator body_rend() const {
     return const_reverse_body_iterator(body_begin());
   }
+
+  void replaceStmts(const ASTContext &C, llvm::ArrayRef<Stmt*> Stmts);
 
   // Get the Stmt that StmtExpr would consider to be the result of this
   // compound statement. This is used by StmtExpr to properly emulate the GCC
