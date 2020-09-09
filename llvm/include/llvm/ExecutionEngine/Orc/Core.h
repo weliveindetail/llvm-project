@@ -1183,18 +1183,6 @@ public:
     return *this;
   }
 
-  void legacyFailQuery(AsynchronousSymbolQuery &Q, Error Err);
-
-  using LegacyAsyncLookupFunction = std::function<SymbolNameSet(
-      std::shared_ptr<AsynchronousSymbolQuery> Q, SymbolNameSet Names)>;
-
-  /// A legacy lookup function for JITSymbolResolverAdapter.
-  /// Do not use -- this will be removed soon.
-  Expected<SymbolMap>
-  legacyLookup(LegacyAsyncLookupFunction AsyncLookup, SymbolNameSet Names,
-               SymbolState RequiredState,
-               RegisterDependenciesFunction RegisterDependencies);
-
   /// Search the given JITDylib list for the given symbols.
   ///
   /// SearchOrder lists the JITDylibs to search. For each dylib, the associated
