@@ -137,8 +137,6 @@ void AsynchronousSymbolQuery::handleComplete() {
   TmpNotifyComplete(std::move(ResolvedSymbols));
 }
 
-bool AsynchronousSymbolQuery::canStillFail() { return !!NotifyComplete; }
-
 void AsynchronousSymbolQuery::handleFailed(Error Err) {
   assert(QueryRegistrations.empty() && ResolvedSymbols.empty() &&
          OutstandingSymbolsCount == 0 &&

@@ -759,8 +759,6 @@ private:
 
   void dropSymbol(const SymbolStringPtr &Name);
 
-  bool canStillFail();
-
   void handleFailed(Error Err);
 
   void detach();
