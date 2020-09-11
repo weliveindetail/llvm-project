@@ -141,7 +141,6 @@ void RTDyldObjectLinkingLayer::emit(
     }
   }
 
-  auto K = R->getVModuleKey();
   RuntimeDyld::MemoryManager *MemMgr = nullptr;
 
   // Create a record a memory manager for this object.
@@ -161,16 +160,16 @@ void RTDyldObjectLinkingLayer::emit(
   jitLinkForORC(
       object::OwningBinary<object::ObjectFile>(std::move(*Obj), std::move(O)),
       *MemMgr, Resolver, ProcessAllSections,
-      [this, K, SharedR, MemMgr, InternalSymbols](
+      [this, SharedR, MemMgr, InternalSymbols](
           const object::ObjectFile &Obj,
           std::unique_ptr<RuntimeDyld::LoadedObjectInfo> LoadedObjInfo,
           std::map<StringRef, JITEvaluatedSymbol> ResolvedSymbols) {
-        return onObjLoad(K, *SharedR, Obj, MemMgr, std::move(LoadedObjInfo),
+        return onObjLoad(*SharedR, Obj, MemMgr, std::move(LoadedObjInfo),
                          ResolvedSymbols, *InternalSymbols);
       },
-      [this, K, SharedR, MemMgr](object::OwningBinary<object::ObjectFile> Obj,
-                                 Error Err) mutable {
-        onObjEmit(K, *SharedR, std::move(Obj), MemMgr, std::move(Err));
+      [this, SharedR, MemMgr](object::OwningBinary<object::ObjectFile> Obj,
+                              Error Err) mutable {
+        onObjEmit(*SharedR, std::move(Obj), MemMgr, std::move(Err));
       });
 }
 
@@ -190,8 +189,8 @@ void RTDyldObjectLinkingLayer::unregisterJITEventListener(JITEventListener &L) {
 }
 
 Error RTDyldObjectLinkingLayer::onObjLoad(
-    VModuleKey K, MaterializationResponsibility &R,
-    const object::ObjectFile &Obj, RuntimeDyld::MemoryManager *MemMgr,
+    MaterializationResponsibility &R, const object::ObjectFile &Obj,
+    RuntimeDyld::MemoryManager *MemMgr,
     std::unique_ptr<RuntimeDyld::LoadedObjectInfo> LoadedObjInfo,
     std::map<StringRef, JITEvaluatedSymbol> Resolved,
     std::set<StringRef> &InternalSymbols) {
@@ -273,7 +272,7 @@ Error RTDyldObjectLinkingLayer::onObjLoad(
   }
 
   if (NotifyLoaded)
-    NotifyLoaded(K, Obj, *LoadedObjInfo);
+    NotifyLoaded(R, Obj, *LoadedObjInfo);
 
   std::lock_guard<std::mutex> Lock(RTDyldLayerMutex);
   assert(!LoadedObjInfos.count(MemMgr) && "Duplicate loaded info for MemMgr");
@@ -283,7 +282,7 @@ Error RTDyldObjectLinkingLayer::onObjLoad(
 }
 
 void RTDyldObjectLinkingLayer::onObjEmit(
-    VModuleKey K, MaterializationResponsibility &R,
+    MaterializationResponsibility &R,
     object::OwningBinary<object::ObjectFile> O,
     RuntimeDyld::MemoryManager *MemMgr, Error Err) {
   if (Err) {
@@ -315,7 +314,7 @@ void RTDyldObjectLinkingLayer::onObjEmit(
   }
 
   if (NotifyEmitted)
-    NotifyEmitted(K, std::move(ObjBuffer));
+    NotifyEmitted(R, std::move(ObjBuffer));
 }
 
 } // End namespace orc.

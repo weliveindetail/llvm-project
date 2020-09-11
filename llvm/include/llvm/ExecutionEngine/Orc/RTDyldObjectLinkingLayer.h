@@ -38,13 +38,13 @@ namespace orc {
 class RTDyldObjectLinkingLayer : public ObjectLayer {
 public:
   /// Functor for receiving object-loaded notifications.
-  using NotifyLoadedFunction =
-      std::function<void(VModuleKey, const object::ObjectFile &Obj,
-                         const RuntimeDyld::LoadedObjectInfo &)>;
+  using NotifyLoadedFunction = std::function<void(
+      MaterializationResponsibility &R, const object::ObjectFile &Obj,
+      const RuntimeDyld::LoadedObjectInfo &)>;
 
   /// Functor for receiving finalization notifications.
-  using NotifyEmittedFunction =
-      std::function<void(VModuleKey, std::unique_ptr<MemoryBuffer>)>;
+  using NotifyEmittedFunction = std::function<void(
+      MaterializationResponsibility &R, std::unique_ptr<MemoryBuffer>)>;
 
   using GetMemoryManagerFunction =
       std::function<std::unique_ptr<RuntimeDyld::MemoryManager>()>;
@@ -122,14 +122,14 @@ public:
   void unregisterJITEventListener(JITEventListener &L);
 
 private:
-  Error onObjLoad(VModuleKey K, MaterializationResponsibility &R,
+  Error onObjLoad(MaterializationResponsibility &R,
                   const object::ObjectFile &Obj,
                   RuntimeDyld::MemoryManager *MemMgr,
                   std::unique_ptr<RuntimeDyld::LoadedObjectInfo> LoadedObjInfo,
                   std::map<StringRef, JITEvaluatedSymbol> Resolved,
                   std::set<StringRef> &InternalSymbols);
 
-  void onObjEmit(VModuleKey K, MaterializationResponsibility &R,
+  void onObjEmit(MaterializationResponsibility &R,
                  object::OwningBinary<object::ObjectFile> O,
                  RuntimeDyld::MemoryManager *MemMgr, Error Err);
 
