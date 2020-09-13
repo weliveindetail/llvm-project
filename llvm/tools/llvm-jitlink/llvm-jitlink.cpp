@@ -1015,15 +1015,13 @@ Error loadProcessSymbols(Session &S) {
   return Error::success();
 }
 
-Error loadDylibs() {
-  // FIXME: This should all be handled inside DynamicLibrary.
+Error loadDylibs(Session &S) {
+
   for (const auto &Dylib : Dylibs) {
-    if (!sys::fs::is_regular_file(Dylib))
-      return make_error<StringError>("\"" + Dylib + "\" is not a regular file",
-                                     inconvertibleErrorCode());
-    std::string ErrMsg;
-    if (sys::DynamicLibrary::LoadLibraryPermanently(Dylib.c_str(), &ErrMsg))
-      return make_error<StringError>(ErrMsg, inconvertibleErrorCode());
+    auto G = orc::TPCDynamicLibrarySearchGenerator::Load(*S.TPC, Dylib.c_str());
+    if (!G)
+      return G.takeError();
+    S.MainJD->addGenerator(std::move(*G));
   }
 
   return Error::success();
@@ -1270,7 +1268,7 @@ int main(int argc, char *argv[]) {
 
   if (!NoProcessSymbols)
     ExitOnErr(loadProcessSymbols(*S));
-  ExitOnErr(loadDylibs());
+  ExitOnErr(loadDylibs(*S));
 
   if (PhonyExternals)
     addPhonyExternalsGenerator(*S);
