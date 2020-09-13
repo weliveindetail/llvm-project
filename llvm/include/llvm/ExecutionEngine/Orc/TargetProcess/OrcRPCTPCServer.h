@@ -374,9 +374,10 @@ public:
 
 } // end namespace orcrpctpc
 
-// TargetProcessControl for a process connected via an ORC RPC Endpoint.
+/// TargetProcessControl for a process connected via an ORC RPC Endpoint.
 template <typename RPCEndpointT> class OrcRPCTPCServer {
 public:
+  /// Create an OrcRPCTPCServer from the given endpoint.
   OrcRPCTPCServer(RPCEndpointT &EP) : EP(EP) {
     using ThisT = OrcRPCTPCServer<RPCEndpointT>;
 
@@ -413,8 +414,16 @@ public:
                                                        &ThisT::closeConnection);
   }
 
+  /// Set the ProgramName to be used as the first argv element when running
+  /// functions via runAsMain.
+  void setProgramName(Optional<std::string> ProgramName = None) {
+    this->ProgramName = std::move(ProgramName);
+  }
+
+  /// Get the RPC endpoint for this server.
   RPCEndpointT &getEndpoint() { return EP; }
 
+  /// Run the server loop.
   Error run() {
     while (!Finished) {
       if (auto Err = EP.handleOne())
@@ -572,9 +581,13 @@ private:
 
   int32_t runMain(JITTargetAddress MainFnAddr,
                   const std::vector<std::string> &Args) {
+    Optional<StringRef> ProgramNameOverride;
+    if (ProgramName)
+      ProgramNameOverride = *ProgramName;
+
     return runAsMain(
         jitTargetAddressToFunction<int (*)(int, char *[])>(MainFnAddr), Args,
-        None);
+        ProgramNameOverride);
   }
 
   tpctypes::WrapperFunctionResult
@@ -592,6 +605,7 @@ private:
 
   std::string TripleStr;
   uint64_t PageSize = 0;
+  Optional<std::string> ProgramName;
   RPCEndpointT &EP;
   std::atomic<bool> Finished{false};
   DenseMap<tpctypes::DylibHandle, sys::DynamicLibrary> Dylibs;

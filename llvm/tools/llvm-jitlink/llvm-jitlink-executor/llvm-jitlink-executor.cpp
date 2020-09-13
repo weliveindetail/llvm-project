@@ -120,6 +120,7 @@ int main(int argc, char *argv[]) {
   rpc::FDRawByteChannel C(InFD, OutFD);
   JITLinkExecutorEndpoint EP(C, true);
   OrcRPCTPCServer<JITLinkExecutorEndpoint> Server(EP);
+  Server.setProgramName(std::string("llvm-jitlink-executor"));
 
   ExitOnErr(Server.run());
 
