@@ -47,10 +47,6 @@ public:
                      HostAllocMap HostAllocs, TargetAllocMap TargetAllocs)
         : Parent(Parent), HostAllocs(std::move(HostAllocs)),
           TargetAllocs(std::move(TargetAllocs)) {
-      // dbgs() << "Adding alloc:\n";
-      // for (auto &KV : this->HostAllocs) {
-      //  dbgs() << "  Alloc: " << (void*)KV.second.Mem.get() << "\n";
-      //}
       assert(HostAllocs.size() == TargetAllocs.size() &&
              "HostAllocs size should match TargetAllocs");
     }
@@ -77,7 +73,6 @@ public:
       std::vector<tpctypes::BufferWrite> BufferWrites;
       orcrpctpc::ReleaseOrFinalizeMemRequest FMR;
 
-      // dbgs() << "Writing...\n";
       for (auto &KV : HostAllocs) {
         assert(TargetAllocs.count(KV.first) &&
                "No target allocation for buffer");
@@ -89,29 +84,51 @@ public:
                        TA.Address, TA.AllocatedSize});
       }
 
+      DEBUG_WITH_TYPE("orc", {
+        dbgs() << "finalizeAsync " << (void*)this << ":\n";
+        auto FMRI = FMR.begin();
+        for (auto &B : BufferWrites) {
+          auto Prot = FMRI->Prot;
+          ++FMRI;
+          dbgs() << "  Writing "
+                 << formatv("{0:x16}", B.Buffer.size()) << " bytes to "
+                 << ((Prot & orcrpctpc::WPF_Read) ? 'R' : '-')
+                 << ((Prot & orcrpctpc::WPF_Write) ? 'W' : '-')
+                 << ((Prot & orcrpctpc::WPF_Exec) ? 'X' : '-')
+                 << " segment: local "
+                 << (void*)B.Buffer.data() << " -> target "
+                 << formatv("{0:x16}", B.Address) << "\n";
+        }
+      });
       if (auto Err =
               Parent.Parent.getMemoryAccess().writeBuffers(BufferWrites)) {
         OnFinalize(std::move(Err));
         return;
       }
 
-      // dbgs() << "Finalizing...\n";
+      DEBUG_WITH_TYPE("orc", dbgs() << " Applying permissions...\n");
       if (auto Err =
               Parent.getEndpoint().template callAsync<orcrpctpc::FinalizeMem>(
                   [OF = std::move(OnFinalize)](Error Err2) {
                     // FIXME: Dispatch to work queue.
                     std::thread([OF = std::move(OF),
                                  Err3 = std::move(Err2)]() mutable {
+                      DEBUG_WITH_TYPE("orc", {
+                        dbgs() << "  finalizeAsync complete\n";
+                      });
                       OF(std::move(Err3));
                     }).detach();
                     return Error::success();
                   },
                   FMR)) {
-        // dbgs() << "finalizing failed.\n";
+        DEBUG_WITH_TYPE("orc", dbgs() << "    failed.\n");
         Parent.getEndpoint().abandonPendingResponses();
         Parent.reportError(std::move(Err));
       }
-      // dbgs() << "finalized.\n";
+      DEBUG_WITH_TYPE("orc", {
+        dbgs() << "Leaving finalizeAsync (finalization may continue in "
+                  "background)\n";
+      });
     }
 
     Error deallocate() override {
@@ -148,6 +165,20 @@ public:
           KV.second.getContentSize()};
     }
 
+    DEBUG_WITH_TYPE("orc", {
+        dbgs() << "Orc remote memmgr got request:\n";
+        for (auto &KV : Request)
+          dbgs() << "  permissions: "
+                 << ((KV.first & sys::Memory::MF_READ) ? 'R' : '-')
+                 << ((KV.first & sys::Memory::MF_WRITE) ? 'W' : '-')
+                 << ((KV.first & sys::Memory::MF_EXEC) ? 'X' : '-')
+                 << ", content size: "
+                 << formatv("{0:x16}", KV.second.getContentSize())
+                 << " + zero-fill-size: "
+                 << formatv("{0:x16}", KV.second.getZeroFillSize())
+                 << ", align: " << KV.second.getAlignment() << "\n";
+      });
+
     // FIXME: LLVM RPC needs to be fixed to support alt
     // serialization/deserialization on return types. For now just
     // translate from std::map to DenseMap manually.
@@ -165,6 +196,18 @@ public:
     for (auto &E : *TmpTargetAllocs)
       TargetAllocs[orcrpctpc::fromWireProtectionFlags(E.Prot)] = {
           E.Address, E.AllocatedSize};
+
+    DEBUG_WITH_TYPE("orc", {
+        auto HAI = HostAllocs.begin();
+        for (auto &KV : TargetAllocs)
+          dbgs() << "  permissions: "
+                 << ((KV.first & sys::Memory::MF_READ) ? 'R' : '-')
+                 << ((KV.first & sys::Memory::MF_WRITE) ? 'W' : '-')
+                 << ((KV.first & sys::Memory::MF_EXEC) ? 'X' : '-')
+                 << " assigned local " << (void*)HAI->second.Mem.get()
+                 << ", target "
+                 << formatv("{0:x16}", KV.second.Address) << "\n";
+      });
 
     return std::make_unique<OrcRPCAllocation>(*this, std::move(HostAllocs),
                                               std::move(TargetAllocs));
@@ -247,9 +290,22 @@ public:
   RPCEndpointT &getEndpoint() { return EP; }
 
   Expected<tpctypes::DylibHandle> loadDylib(const char *DylibPath) override {
+    DEBUG_WITH_TYPE("orc", {
+      dbgs() << "Loading dylib \"" << (DylibPath ? DylibPath : "") << "\" ";
+      if (!DylibPath)
+        dbgs() << "(process symbols)";
+      dbgs() << "\n";
+    });
     if (!DylibPath)
       DylibPath = "";
-    return EP.template callB<orcrpctpc::LoadDylib>(DylibPath);
+    auto H = EP.template callB<orcrpctpc::LoadDylib>(DylibPath);
+    DEBUG_WITH_TYPE("orc", {
+      if (H)
+        dbgs() << "  got handle " << formatv("{0:x16}", *H) << "\n";
+      else
+        dbgs() << "  error, unable to load\n";
+    });
+    return H;
   }
 
   Expected<std::vector<tpctypes::LookupResult>>
@@ -263,19 +319,52 @@ public:
             {(*KV.first).str(),
              KV.second == SymbolLookupFlags::WeaklyReferencedSymbol});
     }
-
+    DEBUG_WITH_TYPE("orc", {
+      dbgs() << "Compound lookup:\n";
+      for (auto &R : Request) {
+        dbgs() << "  In " << formatv("{0:x16}", R.Handle) << ": {";
+        bool First = true;
+        for (auto &KV : R.Symbols) {
+          dbgs() << (First ? "" : ",") << " " << *KV.first;
+          First = false;
+        }
+        dbgs() << " }\n";
+      }
+    });
     return EP.template callB<orcrpctpc::LookupSymbols>(RR);
   }
 
   Expected<int32_t> runAsMain(JITTargetAddress MainFnAddr,
                               ArrayRef<std::string> Args) override {
-    return EP.template callB<orcrpctpc::RunMain>(MainFnAddr, Args);
+    DEBUG_WITH_TYPE("orc", {
+      dbgs() << "Running as main: "
+             << formatv("{0:x16}", MainFnAddr)
+             << ", args = [";
+      for (unsigned I = 0; I != Args.size(); ++I)
+        dbgs() << (I ? "," : "") << " \"" << Args[I] << "\"";
+      dbgs() << "]\n";
+    });
+    auto Result = EP.template callB<orcrpctpc::RunMain>(MainFnAddr, Args);
+    DEBUG_WITH_TYPE("orc", {
+        dbgs() << "  call to " << formatv("{0:x16}", MainFnAddr);
+        if (Result)
+          dbgs() << " returned result " << *Result << "\n";
+        else
+          dbgs() << " failed\n";
+    });
+    return Result;
   }
 
   Expected<tpctypes::WrapperFunctionResult>
   runWrapper(JITTargetAddress WrapperFnAddr,
              ArrayRef<uint8_t> ArgBuffer) override {
-    // dbgs() << "Calling runWrapper...\n";
+    DEBUG_WITH_TYPE("orc", {
+      dbgs() << "Running as wrapper function "
+             << formatv("{0:x16}", WrapperFnAddr)
+             << " with "
+             << formatv("{0:x16}", ArgBuffer.size())
+             << " argument buffer\n";
+    });
     auto Result =
         EP.template callB<orcrpctpc::RunWrapper>(WrapperFnAddr, ArgBuffer);
     // dbgs() << "Returned from runWrapper...\n";
@@ -283,6 +372,7 @@ public:
   }
 
   Error closeConnection(OnCloseConnectionFunction OnCloseConnection) {
+    DEBUG_WITH_TYPE("orc", dbgs() << "Closing connection to remote\n");
     return EP.template callAsync<orcrpctpc::CloseConnection>(
         std::move(OnCloseConnection));
   }
