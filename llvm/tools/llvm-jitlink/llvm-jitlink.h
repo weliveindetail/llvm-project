@@ -92,7 +92,7 @@ private:
     });
 
     if (auto Err2 = initializeORCRPCTPCBase()) {
-      Err = std::move(Err2);
+      Err = joinErrors(std::move(Err2), disconnect());
       return;
     }
 
