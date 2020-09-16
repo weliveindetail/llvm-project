@@ -463,6 +463,8 @@ private:
     orcrpctpc::ReserveMemResult Allocs;
     auto PF = sys::Memory::MF_READ | sys::Memory::MF_WRITE;
 
+    uint64_t TotalSize = 0;
+
     for (auto &E : Request) {
       uint64_t Size = alignTo(E.Size, PageSize);
       uint16_t Align = E.Alignment;
@@ -472,23 +474,27 @@ private:
             "Page alignmen does not satisfy requested alignment",
             inconvertibleErrorCode());
 
-      std::error_code EC;
-      auto MB = sys::Memory::allocateMappedMemory(Size, nullptr, PF, EC);
-      if (EC)
-        return make_error<StringError>("Unable to allocate memory: " +
-                                           EC.message(),
-                                       inconvertibleErrorCode());
+      TotalSize += Size;
+    }
 
-      memset(MB.base(), 0, MB.allocatedSize());
+    // Allocate memory slab.
+    std::error_code EC;
+    auto MB = sys::Memory::allocateMappedMemory(TotalSize, nullptr, PF, EC);
+    if (EC)
+      return make_error<StringError>("Unable to allocate memory: " +
+                                         EC.message(),
+                                     inconvertibleErrorCode());
 
-      //      dbgs() << "Reserve: size = " << formatv("{0:x16}", E.Size)
-      //             << ", align = " << formatv("{0:x8}", E.Alignment)
-      //             << " --> [ " << MB.base() << " -- "
-      //             << (void*)((char*)MB.base() + MB.allocatedSize()) << "
-      //             ]\n";
+    // Zero-fill the whole thing.
+    memset(MB.base(), 0, MB.allocatedSize());
 
-      Allocs.push_back(
-          {E.Prot, pointerToJITTargetAddress(MB.base()), MB.allocatedSize()});
+    // Carve up sections to return.
+    uint64_t SectionBase = 0;
+    for (auto &E : Request) {
+      uint64_t SectionSize = alignTo(E.Size, PageSize);
+      Allocs.push_back({E.Prot,
+                        pointerToJITTargetAddress(MB.base()) + SectionBase,
+                        SectionSize});
     }
 
     return Allocs;
