@@ -130,35 +130,35 @@ config.substitutions.append(
 config.llvm_locstats_used = os.path.exists(llvm_locstats_tool)
 
 tools = [
-    ToolSubst('%lli', FindTool('lli'), post='.', extra_args=lli_args),
-    ToolSubst('%llc_dwarf', FindTool('llc'), extra_args=llc_args),
+    ToolSubst('%lli', FindTool('lli'), post='.', extra_args=lli_args, unresolved='ignore'),
+    ToolSubst('%llc_dwarf', FindTool('llc'), extra_args=llc_args, unresolved='ignore'),
     ToolSubst('%go', config.go_executable, unresolved='ignore'),
     ToolSubst('%gold', config.gold_executable, unresolved='ignore'),
     ToolSubst('%ld64', ld64_cmd, unresolved='ignore'),
     ToolSubst('%ocamlc', ocamlc_command, unresolved='ignore'),
     ToolSubst('%ocamlopt', ocamlopt_command, unresolved='ignore'),
-    ToolSubst('%opt-viewer', opt_viewer_cmd),
-    ToolSubst('%llvm-objcopy', FindTool('llvm-objcopy')),
-    ToolSubst('%llvm-strip', FindTool('llvm-strip')),
-    ToolSubst('%llvm-install-name-tool', FindTool('llvm-install-name-tool')),
-    ToolSubst('%llvm-bitcode-strip', FindTool('llvm-bitcode-strip')),
-    ToolSubst('%split-file', FindTool('split-file')),
+    ToolSubst('%opt-viewer', opt_viewer_cmd, unresolved='ignore'),
+    ToolSubst('%llvm-objcopy', FindTool('llvm-objcopy'), unresolved='ignore'),
+    ToolSubst('%llvm-strip', FindTool('llvm-strip'), unresolved='ignore'),
+    ToolSubst('%llvm-install-name-tool', FindTool('llvm-install-name-tool'), unresolved='ignore'),
+    ToolSubst('%llvm-bitcode-strip', FindTool('llvm-bitcode-strip'), unresolved='ignore'),
+    ToolSubst('%split-file', FindTool('split-file'), unresolved='ignore'),
 ]
 
 # FIXME: Why do we have both `lli` and `%lli` that do slightly different things?
-tools.extend([
-    'dsymutil', 'lli', 'lli-child-target', 'llvm-ar', 'llvm-as',
-    'llvm-addr2line', 'llvm-bcanalyzer', 'llvm-bitcode-strip', 'llvm-config', 
-    'llvm-cov', 'llvm-cxxdump', 'llvm-cvtres', 'llvm-diff', 'llvm-dis', 
-    'llvm-dwarfdump', 'llvm-exegesis', 'llvm-extract', 'llvm-isel-fuzzer', 'llvm-ifs',
-    'llvm-install-name-tool', 'llvm-jitlink', 'llvm-opt-fuzzer', 'llvm-lib',
-    'llvm-link', 'llvm-lto', 'llvm-lto2', 'llvm-mc', 'llvm-mca',
-    'llvm-modextract', 'llvm-nm', 'llvm-objcopy', 'llvm-objdump',
-    'llvm-pdbutil', 'llvm-profdata', 'llvm-ranlib', 'llvm-rc', 'llvm-readelf',
-    'llvm-readobj', 'llvm-rtdyld', 'llvm-size', 'llvm-split', 'llvm-strings',
-    'llvm-strip', 'llvm-tblgen', 'llvm-undname', 'llvm-c-test', 'llvm-cxxfilt',
-    'llvm-xray', 'yaml2obj', 'obj2yaml', 'yaml-bench', 'verify-uselistorder',
-    'bugpoint', 'llc', 'llvm-symbolizer', 'opt', 'sancov', 'sanstats'])
+#tools.extend([
+#    'dsymutil', 'lli', 'lli-child-target', 'llvm-ar', 'llvm-as',
+#    'llvm-addr2line', 'llvm-bcanalyzer', 'llvm-bitcode-strip', 'llvm-config', 
+#    'llvm-cov', 'llvm-cxxdump', 'llvm-cvtres', 'llvm-diff', 'llvm-dis', 
+#    'llvm-dwarfdump', 'llvm-exegesis', 'llvm-extract', 'llvm-isel-fuzzer', 'llvm-ifs',
+#    'llvm-install-name-tool', 'llvm-jitlink', 'llvm-opt-fuzzer', 'llvm-lib',
+#    'llvm-link', 'llvm-lto', 'llvm-lto2', 'llvm-mc', 'llvm-mca',
+#    'llvm-modextract', 'llvm-nm', 'llvm-objcopy', 'llvm-objdump',
+#    'llvm-pdbutil', 'llvm-profdata', 'llvm-ranlib', 'llvm-rc', 'llvm-readelf',
+#    'llvm-readobj', 'llvm-rtdyld', 'llvm-size', 'llvm-split', 'llvm-strings',
+#    'llvm-strip', 'llvm-tblgen', 'llvm-undname', 'llvm-c-test', 'llvm-cxxfilt',
+#    'llvm-xray', 'yaml2obj', 'obj2yaml', 'yaml-bench', 'verify-uselistorder',
+#    'bugpoint', 'llc', 'llvm-symbolizer', 'opt', 'sancov', 'sanstats'])
 
 # The following tools are optional
 tools.extend([
@@ -255,8 +255,8 @@ def have_cxx_shared_library():
             return True
     return False
 
-if have_cxx_shared_library():
-    config.available_features.add('cxx-shared-library')
+#if have_cxx_shared_library():
+#    config.available_features.add('cxx-shared-library')
 
 if config.libcxx_used:
     config.available_features.add('libcxx-used')
