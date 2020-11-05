@@ -823,7 +823,7 @@ Session::Session(std::unique_ptr<TargetProcessControl> TPC, Error &Err)
     return;
   }
 
-  if (!NoExec && !this->TPC->getTargetTriple().isOSWindows())
+  if (!NoExec && this->TPC->getTargetTriple().isOSBinFormatMachO())
     ObjLayer.addPlugin(std::make_unique<EHFrameRegistrationPlugin>(
         ES, ExitOnErr(TPCEHFrameRegistrar::Create(*this->TPC))));
 
