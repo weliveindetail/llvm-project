@@ -1203,10 +1203,6 @@ public:
   virtual Error notifyAdding(ResourceTracker &RT,
                              const MaterializationUnit &MU) = 0;
 
-  /// This method will be called under the ExecutionSession lock when a
-  /// ResourceTracker is removed.
-  virtual Error notifyRemoving(ResourceTracker &RT) = 0;
-
   /// A utility function for looking up initializer symbols. Performs a blocking
   /// lookup for the given symbols in each of the given JITDylibs.
   static Expected<DenseMap<JITDylib *, SymbolMap>>

@@ -96,18 +96,18 @@ SelfTargetProcessControl::lookupSymbols(
   return R;
 }
 
-Expected<int32_t>
+Expected<int64_t>
 SelfTargetProcessControl::runAsMain(JITTargetAddress MainFnAddr,
                                     ArrayRef<std::string> Args) {
   using MainTy = int (*)(int, char *[]);
   return orc::runAsMain(jitTargetAddressToFunction<MainTy>(MainFnAddr), Args);
 }
 
-Expected<tpctypes::WrapperFunctionResult>
+Expected<shared::WrapperFunctionResult>
 SelfTargetProcessControl::runWrapper(JITTargetAddress WrapperFnAddr,
                                      ArrayRef<uint8_t> ArgBuffer) {
-  using WrapperFnTy =
-      tpctypes::CWrapperFunctionResult (*)(const uint8_t *Data, uint64_t Size);
+  using WrapperFnTy = LLVMOrcSharedCWrapperFunctionResult (*)(
+      const uint8_t *Data, uint64_t Size);
   auto *WrapperFn = jitTargetAddressToFunction<WrapperFnTy>(WrapperFnAddr);
   return WrapperFn(ArgBuffer.data(), ArgBuffer.size());
 }

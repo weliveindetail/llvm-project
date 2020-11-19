@@ -15,7 +15,9 @@
 #include "llvm-jitlink.h"
 
 #include "llvm/BinaryFormat/Magic.h"
+#include "llvm/ExecutionEngine/Orc/DebugUtils.h"
 #include "llvm/ExecutionEngine/Orc/ExecutionUtils.h"
+#include "llvm/ExecutionEngine/Orc/MachOPlatform.h"
 #include "llvm/ExecutionEngine/Orc/TPCDynamicLibrarySearchGenerator.h"
 #include "llvm/ExecutionEngine/Orc/TPCEHFrameRegistrar.h"
 #include "llvm/MC/MCAsmInfo.h"
@@ -152,6 +154,15 @@ static cl::opt<std::string> OutOfProcessExecutor(
 static cl::opt<std::string> OutOfProcessExecutorConnect(
     "oop-executor-connect",
     cl::desc("Connect to an out-of-process executor via TCP"));
+
+// TODO: Default to false if compiler-rt is not built.
+static cl::opt<bool> UseOrcRuntime("use-orc-runtime",
+                                   cl::desc("Do not required/load ORC runtime"),
+                                   cl::init(true));
+
+static cl::opt<std::string>
+    OrcRuntimePath("orc-runtime-path", cl::desc("Add orc runtime to session"),
+                   cl::init(""));
 
 ExitOnError ExitOnErr;
 
@@ -772,20 +783,20 @@ Expected<std::unique_ptr<Session>> Session::Create(Triple TT) {
 
   Error Err = Error::success();
   std::unique_ptr<Session> S(new Session(std::move(TPC), Err));
-  if (Err)
-    return std::move(Err);
-  return std::move(S);
+  ExitOnErr(std::move(Err));
+  return S;
 }
 
 Session::~Session() {
   if (auto Err = ES.endSession())
     ES.reportError(std::move(Err));
+  if (auto Err = TPC->disconnect())
+    ES.reportError(std::move(Err));
 }
 
-// FIXME: Move to createJITDylib if/when we start using Platform support in
-// llvm-jitlink.
 Session::Session(std::unique_ptr<TargetProcessControl> TPC, Error &Err)
-    : TPC(std::move(TPC)), ObjLayer(*this, this->TPC->getMemMgr()) {
+    : TPC(std::move(TPC)), ES(this->TPC->getSymbolStringPool()),
+      ObjLayer(*this, this->TPC->getMemMgr()) {
 
   /// Local ObjectLinkingLayer::Plugin class to forward modifyPassConfig to the
   /// Session.
@@ -812,18 +823,64 @@ Session::Session(std::unique_ptr<TargetProcessControl> TPC, Error &Err)
 
   ErrorAsOutParameter _(&Err);
 
-  if (auto MainJDOrErr = ES.createJITDylib("main"))
-    MainJD = &*MainJDOrErr;
-  else {
-    Err = MainJDOrErr.takeError();
-    return;
-  }
-
   if (!NoExec && !this->TPC->getTargetTriple().isOSWindows())
     ObjLayer.addPlugin(std::make_unique<EHFrameRegistrationPlugin>(
         ES, ExitOnErr(TPCEHFrameRegistrar::Create(*this->TPC))));
 
   ObjLayer.addPlugin(std::make_unique<JITLinkSessionPlugin>(*this));
+
+  if (this->TPC->getTargetTriple().isOSBinFormatMachO() && UseOrcRuntime) {
+
+    auto P = MachOPlatform::Create(ES, ObjLayer,
+                                   this->TPC->getTargetTriple());
+    if (!P) {
+      Err = P.takeError();
+      return;
+    }
+
+    FinishRuntimeSetup = [this, &P = **P] {
+      if (OutOfProcessExecutor.getNumOccurrences() ||
+          OutOfProcessExecutorConnect.getNumOccurrences())
+        return P.addRemoteRuntimeSupport(*this->MainJD,
+                                         this->TPC->getWrapperFunctionManager());
+      else
+        return P.addInProcessRuntimeSupport(*this->MainJD);
+    };
+
+    ES.setPlatform(std::move(*P));
+
+    if (auto MainJDOrErr = ES.createJITDylib("Main"))
+      MainJD = &*MainJDOrErr;
+    else {
+      Err = MainJDOrErr.takeError();
+      return;
+    }
+
+    auto RuntimeLibraryBuffer =
+        errorOrToExpected(MemoryBuffer::getFile(OrcRuntimePath));
+    if (!RuntimeLibraryBuffer) {
+      Err = RuntimeLibraryBuffer.takeError();
+      return;
+    }
+
+    auto RTGenerator = StaticLibraryDefinitionGenerator::Load(
+        ObjLayer, OrcRuntimePath.c_str(), this->TPC->getTargetTriple());
+    if (!RTGenerator) {
+      Err = RTGenerator.takeError();
+      return;
+    }
+    MainJD->addGenerator(std::move(*RTGenerator));
+
+  } else {
+    LLVM_DEBUG(dbgs() << "Not loading ORC runtime (-use-orc-runtime false)\n");
+    if (auto MainJDOrErr = ES.createJITDylib("Main"))
+      MainJD = &*MainJDOrErr;
+    else {
+      Err = MainJDOrErr.takeError();
+      return;
+    }
+    FinishRuntimeSetup = []() -> Error { return Error::success(); };
+  }
 
   // Process any harness files.
   for (auto &HarnessFile : TestHarnesses) {
@@ -989,10 +1046,12 @@ static Triple getFirstFileTriple() {
 static Error sanitizeArguments(const Triple &TT, const char *ArgV0) {
   // Set the entry point name if not specified.
   if (EntryPointName.empty()) {
-    if (TT.getObjectFormat() == Triple::MachO)
-      EntryPointName = "_main";
+    if (UseOrcRuntime)
+      EntryPointName = "__orc_rt_run_program";
     else
       EntryPointName = "main";
+    if (TT.getObjectFormat() == Triple::MachO)
+      EntryPointName = "_" + EntryPointName;
   }
 
   // -noexec and --args should not be used together.
@@ -1022,12 +1081,27 @@ static Error sanitizeArguments(const Triple &TT, const char *ArgV0) {
     SmallString<256> OOPExecutorPath(sys::fs::getMainExecutable(
         ArgV0, reinterpret_cast<void *>(&sanitizeArguments)));
     sys::path::remove_filename(OOPExecutorPath);
-    if (OOPExecutorPath.back() != '/')
-      OOPExecutorPath += '/';
-    OOPExecutorPath += "llvm-jitlink-executor";
+    sys::path::append(OOPExecutorPath, "llvm-jitlink-executor");
     OutOfProcessExecutor = OOPExecutorPath.str().str();
   }
 
+  // If we're loading the Orc runtime then determine the path for it.
+  if (UseOrcRuntime) {
+    if (OrcRuntimePath.empty()) {
+      SmallString<256> DefaultOrcRuntimePath(sys::fs::getMainExecutable(
+          ArgV0, reinterpret_cast<void *>(&sanitizeArguments)));
+      sys::path::remove_filename(
+          DefaultOrcRuntimePath); // remove 'llvm-jitlink'
+      while (!DefaultOrcRuntimePath.empty() &&
+             DefaultOrcRuntimePath.back() == '/')
+        DefaultOrcRuntimePath.pop_back();
+      if (DefaultOrcRuntimePath.endswith("bin"))
+        sys::path::remove_filename(DefaultOrcRuntimePath); // remove 'bin'
+      sys::path::append(DefaultOrcRuntimePath,
+                        "lib/clang/12.0.0/lib/darwin/libclang_rt.orc_osx.a");
+      OrcRuntimePath = DefaultOrcRuntimePath.str().str();
+    }
+  }
   return Error::success();
 }
 
@@ -1301,6 +1375,7 @@ int main(int argc, char *argv[]) {
   if (PhonyExternals)
     addPhonyExternalsGenerator(*S);
 
+  ExitOnErr(S->FinishRuntimeSetup());
 
   if (ShowInitialExecutionSessionState)
     S->ES.dump(outs());
@@ -1327,8 +1402,8 @@ int main(int argc, char *argv[]) {
     Result = ExitOnErr(S->TPC->runAsMain(EntryPoint.getAddress(), InputArgv));
   }
 
-  ExitOnErr(S->ES.endSession());
-  ExitOnErr(S->TPC->disconnect());
+  // Destroy the session.
+  S.reset();
 
   return Result;
 }

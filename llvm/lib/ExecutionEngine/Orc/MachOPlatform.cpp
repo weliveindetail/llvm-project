@@ -15,6 +15,9 @@
 
 #define DEBUG_TYPE "orc"
 
+using namespace llvm;
+using namespace llvm::orc;
+
 namespace {
 
 struct objc_class;
@@ -37,6 +40,114 @@ ObjCRegistrationAPI ObjCRegistrationAPIState =
 ObjCMsgSendTy objc_msgSend = nullptr;
 ObjCReadClassPairTy objc_readClassPair = nullptr;
 SelRegisterNameTy sel_registerName = nullptr;
+
+class MachOHeaderMaterializationUnit : public MaterializationUnit {
+public:
+
+  MachOHeaderMaterializationUnit(MachOPlatform &MOP,
+                                 const SymbolStringPtr &HeaderStartSymbol)
+    : MaterializationUnit(createHeaderSymbols(MOP, HeaderStartSymbol),
+                          HeaderStartSymbol),
+      MOP(MOP) {
+  }
+
+  StringRef getName() const override { return "MachOHeaderMU"; }
+
+  void materialize(std::unique_ptr<MaterializationResponsibility> R) override {
+    unsigned PointerSize;
+    support::endianness Endianness;
+
+    switch (MOP.getTargetTriple().getArch()) {
+    case Triple::aarch64:
+    case Triple::x86_64:
+      PointerSize = 8;
+      Endianness = support::endianness::little;
+      break;
+    default:
+      llvm_unreachable("Unrecognized architecture");
+    }
+
+    auto G =
+      std::make_unique<jitlink::LinkGraph>("<MachOHeaderMU>",
+                                           MOP.getTargetTriple(),
+                                           PointerSize, Endianness);
+    auto &HeaderSection = G->createSection("__header", sys::Memory::MF_READ);
+    auto &HeaderBlock = createHeaderBlock(*G, HeaderSection);
+
+    // Init symbol is header-start symbol.
+    G->addDefinedSymbol(HeaderBlock, 0, *R->getInitializerSymbol(),
+                        HeaderBlock.getSize(), jitlink::Linkage::Strong,
+                        jitlink::Scope::Default, false, true);
+    for (auto &HS : AdditionalHeaderSymbols)
+      G->addDefinedSymbol(HeaderBlock, HS.Offset, HS.Name,
+                          HeaderBlock.getSize(), jitlink::Linkage::Strong,
+                          jitlink::Scope::Default, false, true);
+
+    MOP.getObjectLinkingLayer().emit(std::move(R), std::move(G));
+  }
+
+  void discard(const JITDylib &JD, const SymbolStringPtr &Sym) override {}
+
+private:
+
+  struct HeaderSymbol {
+    const char *Name;
+    uint64_t Offset;
+  };
+
+  static constexpr HeaderSymbol AdditionalHeaderSymbols[] = {
+    { "___mh_executable_header", 0 }
+  };
+
+  static jitlink::Block &createHeaderBlock(jitlink::LinkGraph &G,
+                                           jitlink::Section &HeaderSection) {
+    MachO::mach_header_64 Hdr;
+    Hdr.magic = MachO::MH_MAGIC_64;
+    switch (G.getTargetTriple().getArch()) {
+    case Triple::aarch64:
+      Hdr.cputype = MachO::CPU_TYPE_ARM64;
+      Hdr.cpusubtype = MachO::CPU_SUBTYPE_ARM64_ALL;
+      break;
+    case Triple::x86_64:
+      Hdr.cputype = MachO::CPU_TYPE_X86_64;
+      Hdr.cpusubtype = MachO::CPU_SUBTYPE_X86_64_ALL;
+      break;
+    default:
+      llvm_unreachable("Unrecognized architecture");
+    }
+    Hdr.filetype = MachO::MH_DYLIB; // Custom file type?
+    Hdr.ncmds = 0;
+    Hdr.sizeofcmds = 0;
+    Hdr.flags = 0;
+    Hdr.reserved = 0;
+
+    if (G.getEndianness() != support::endian::system_endianness())
+      MachO::swapStruct(Hdr);
+
+    auto HeaderContent =
+      G.allocateString(StringRef(reinterpret_cast<const char *>(&Hdr),
+                                 sizeof(Hdr)));
+
+    return G.createContentBlock(HeaderSection, HeaderContent, 0, 8, 0);
+  }
+
+  static SymbolFlagsMap createHeaderSymbols(
+      MachOPlatform &MOP, const SymbolStringPtr &HeaderStartSymbol) {
+    SymbolFlagsMap HeaderSymbolFlags;
+
+    HeaderSymbolFlags[HeaderStartSymbol] = JITSymbolFlags::Exported;
+    for (auto &HS : AdditionalHeaderSymbols)
+      HeaderSymbolFlags[MOP.getExecutionSession().intern(HS.Name)] =
+        JITSymbolFlags::Exported;
+
+    return HeaderSymbolFlags;
+  }
+
+  MachOPlatform &MOP;
+};
+
+constexpr MachOHeaderMaterializationUnit::HeaderSymbol
+    MachOHeaderMaterializationUnit::AdditionalHeaderSymbols[];
 
 } // end anonymous namespace
 
@@ -86,8 +197,19 @@ bool objCRegistrationEnabled() {
   return ObjCRegistrationAPIState == ObjCRegistrationAPI::Initialized;
 }
 
-void MachOJITDylibInitializers::runModInits() const {
-  for (const auto &ModInit : ModInitSections) {
+Expected<std::unique_ptr<MachOPlatform>>
+MachOPlatform::Create(ExecutionSession &ES, ObjectLinkingLayer &ObjLinkingLayer,
+                      Triple TT) {
+  if (!supportedTarget(TT))
+    return make_error<StringError>("Unsupported MachOPlatform triple: " +
+                                   TT.str(),
+                                   inconvertibleErrorCode());
+  return std::unique_ptr<MachOPlatform>(
+    new MachOPlatform(ES, ObjLinkingLayer, std::move(TT)));
+}
+
+void MachOPlatform::runModInits(shared::MachOJITDylibInitializers &MOIs) const {
+  for (const auto &ModInit : MOIs.getModInitsSections()) {
     for (uint64_t I = 0; I != ModInit.NumPtrs; ++I) {
       auto *InitializerAddr = jitTargetAddressToPointer<uintptr_t *>(
           ModInit.Address + (I * sizeof(uintptr_t)));
@@ -98,10 +220,11 @@ void MachOJITDylibInitializers::runModInits() const {
   }
 }
 
-void MachOJITDylibInitializers::registerObjCSelectors() const {
+void MachOPlatform::registerObjCSelectors(
+    shared::MachOJITDylibInitializers &MOIs) const {
   assert(objCRegistrationEnabled() && "ObjC registration not enabled.");
 
-  for (const auto &ObjCSelRefs : ObjCSelRefsSections) {
+  for (const auto &ObjCSelRefs : MOIs.getObjCSelRefsSections()) {
     for (uint64_t I = 0; I != ObjCSelRefs.NumPtrs; ++I) {
       auto SelEntryAddr = ObjCSelRefs.Address + (I * sizeof(uintptr_t));
       const auto *SelName =
@@ -112,7 +235,8 @@ void MachOJITDylibInitializers::registerObjCSelectors() const {
   }
 }
 
-Error MachOJITDylibInitializers::registerObjCClasses() const {
+Error MachOPlatform::registerObjCClasses(
+    shared::MachOJITDylibInitializers &MOIs) const {
   assert(objCRegistrationEnabled() && "ObjC registration not enabled.");
 
   struct ObjCClassCompiled {
@@ -124,10 +248,11 @@ Error MachOJITDylibInitializers::registerObjCClasses() const {
   };
 
   auto *ImageInfo =
-      jitTargetAddressToPointer<const objc_image_info *>(ObjCImageInfoAddr);
+    jitTargetAddressToPointer<const objc_image_info *>(
+        MOIs.getObjCImageInfoAddr());
   auto ClassSelector = sel_registerName("class");
 
-  for (const auto &ObjCClassList : ObjCClassListSections) {
+  for (const auto &ObjCClassList : MOIs.getObjCClassListSections()) {
     for (uint64_t I = 0; I != ObjCClassList.NumPtrs; ++I) {
       auto ClassPtrAddr = ObjCClassList.Address + (I * sizeof(uintptr_t));
       auto Cls = *jitTargetAddressToPointer<Class *>(ClassPtrAddr);
@@ -145,18 +270,9 @@ Error MachOJITDylibInitializers::registerObjCClasses() const {
   return Error::success();
 }
 
-MachOPlatform::MachOPlatform(
-    ExecutionSession &ES, ObjectLinkingLayer &ObjLinkingLayer,
-    std::unique_ptr<MemoryBuffer> StandardSymbolsObject)
-    : ES(ES), ObjLinkingLayer(ObjLinkingLayer),
-      StandardSymbolsObject(std::move(StandardSymbolsObject)) {
-  ObjLinkingLayer.addPlugin(std::make_unique<InitScraperPlugin>(*this));
-}
-
 Error MachOPlatform::setupJITDylib(JITDylib &JD) {
-  auto ObjBuffer = MemoryBuffer::getMemBuffer(
-      StandardSymbolsObject->getMemBufferRef(), false);
-  return ObjLinkingLayer.add(JD, std::move(ObjBuffer));
+  return JD.define(std::make_unique<MachOHeaderMaterializationUnit>(*this,
+                                                                    MachOHeaderStartSymbol));
 }
 
 Error MachOPlatform::notifyAdding(ResourceTracker &RT,
@@ -173,10 +289,6 @@ Error MachOPlatform::notifyAdding(ResourceTracker &RT,
            << MU.getName() << "\n";
   });
   return Error::success();
-}
-
-Error MachOPlatform::notifyRemoving(ResourceTracker &RT) {
-  llvm_unreachable("Not supported yet");
 }
 
 Expected<MachOPlatform::InitializerSequence>
@@ -238,7 +350,7 @@ MachOPlatform::getInitializerSequence(JITDylib &JD) {
       });
       auto ISItr = InitSeqs.find(InitJD.get());
       if (ISItr != InitSeqs.end()) {
-        FullInitSeq.emplace_back(InitJD.get(), std::move(ISItr->second));
+        FullInitSeq.push_back(std::move(ISItr->second));
         InitSeqs.erase(ISItr);
       }
     }
@@ -255,45 +367,263 @@ MachOPlatform::getDeinitializerSequence(JITDylib &JD) {
   {
     std::lock_guard<std::mutex> Lock(InitSeqsMutex);
     for (auto &DeinitJD : DFSLinkOrder) {
-      FullDeinitSeq.emplace_back(DeinitJD.get(), MachOJITDylibDeinitializers());
+      (void)DeinitJD;
+      FullDeinitSeq.push_back(shared::MachOJITDylibDeinitializers());
     }
   }
 
   return FullDeinitSeq;
 }
 
-void MachOPlatform::registerInitInfo(
-    JITDylib &JD, JITTargetAddress ObjCImageInfoAddr,
-    MachOJITDylibInitializers::SectionExtent ModInits,
-    MachOJITDylibInitializers::SectionExtent ObjCSelRefs,
-    MachOJITDylibInitializers::SectionExtent ObjCClassList) {
-  std::lock_guard<std::mutex> Lock(InitSeqsMutex);
+Expected<JITTargetAddress>
+MachOPlatform::dlsymLookup(JITTargetAddress DSOHandle, StringRef Symbol) {
+  auto I = HeaderAddrToJITDylib.find(DSOHandle);
+  if (I == HeaderAddrToJITDylib.end())
+    return make_error<StringError>("handle " + formatv("{0:x}", DSOHandle) +
+                                   " not recognized",
+                                   inconvertibleErrorCode());
 
-  auto &InitSeq = InitSeqs[&JD];
-
-  InitSeq.setObjCImageInfoAddr(ObjCImageInfoAddr);
-
-  if (ModInits.Address)
-    InitSeq.addModInitsSection(std::move(ModInits));
-
-  if (ObjCSelRefs.Address)
-    InitSeq.addObjCSelRefsSection(std::move(ObjCSelRefs));
-
-  if (ObjCClassList.Address)
-    InitSeq.addObjCClassListSection(std::move(ObjCClassList));
+  auto MangledName = ("_" + Symbol).str();
+  auto Sym = ES.lookup({I->second}, MangledName);
+  if (!Sym)
+    return Sym.takeError();
+  return Sym->getAddress();
 }
 
-static Expected<MachOJITDylibInitializers::SectionExtent>
+static SymbolAliasMap commonMachORuntimeAliases(ExecutionSession &ES) {
+  SymbolAliasMap CRA;
+
+  CRA[ES.intern("___orc_rt_run_program")] =
+    { ES.intern("___orc_rt_macho_run_program"), JITSymbolFlags::Exported };
+  CRA[ES.intern("___orc_rt_log_error")] =
+    { ES.intern("___orc_rt_log_error_to_stderr"), JITSymbolFlags::Exported };
+  CRA[ES.intern("___cxa_atexit")] =
+    { ES.intern("___orc_rt_cxa_atexit"), JITSymbolFlags::Exported };
+
+  return CRA;
+}
+
+Error MachOPlatform::addInProcessRuntimeSupport(JITDylib &JD) {
+  auto RuntimeAliases = commonMachORuntimeAliases(ES);
+
+  RuntimeAliases[ES.intern("___orc_rt_macho_get_initializers")] =
+    { ES.intern("___orc_rt_macho_get_initializers_local"),
+      JITSymbolFlags::Exported };
+
+  RuntimeAliases[ES.intern("___orc_rt_macho_symbol_lookup")] =
+    { ES.intern("___orc_rt_macho_symbol_lookup_local"), JITSymbolFlags::Exported };
+
+  auto MachOPlatformSym =
+    ES.lookup({{&JD, JITDylibLookupFlags::MatchAllSymbols}},
+              ES.intern("___macho_platform"));
+  if (!MachOPlatformSym)
+    return MachOPlatformSym.takeError();
+
+  *jitTargetAddressToPointer<void**>(MachOPlatformSym->getAddress()) = this;
+
+  return JD.define(symbolAliases(std::move(RuntimeAliases)));
+}
+
+Error MachOPlatform::addRemoteRuntimeSupport(JITDylib &JD,
+                                             WrapperFunctionManager &WFM) {
+  auto RuntimeAliases = commonMachORuntimeAliases(ES);
+
+  RuntimeAliases[ES.intern("___orc_rt_macho_get_initializers")] =
+    { ES.intern("___orc_rt_macho_get_initializers_remote"),
+      JITSymbolFlags::Exported };
+
+  RuntimeAliases[ES.intern("___orc_rt_macho_symbol_lookup")] =
+    { ES.intern("___orc_rt_macho_symbol_lookup_remote"),
+      JITSymbolFlags::Exported };
+
+  if (auto Err = JD.define(symbolAliases(std::move(RuntimeAliases))))
+    return Err;
+
+  RuntimeSupportWrapperFunctionsMap RSWFM;
+
+  RSWFM[ES.intern("___orc_rt_macho_get_initializers_tag")] =
+      runtimeSupportMethod(&MachOPlatform::rt_getInitializerSequenceWrapper);
+  RSWFM[ES.intern("___orc_rt_macho_symbol_lookup_tag")] =
+      runtimeSupportMethod(&MachOPlatform::rt_dlsymLookupWrapper);
+
+  SymbolLookupSet TagSymbols;
+  for (auto &KV : RSWFM)
+    TagSymbols.add(KV.first);
+
+  auto WrapperFunctionTagAddrs =
+      ES.lookup({{&JD, JITDylibLookupFlags::MatchAllSymbols}}, TagSymbols);
+  if (!WrapperFunctionTagAddrs)
+    return WrapperFunctionTagAddrs.takeError();
+
+  DenseMap<JITTargetAddress, WrapperFunctionManager::WrapperFunction>
+      TagToWrapperFunction;
+  for (auto &KV : *WrapperFunctionTagAddrs) {
+    auto I = RSWFM.find(KV.first);
+    assert(I != RSWFM.end() && "Missing WrapperFunctions entry");
+    TagToWrapperFunction[KV.second.getAddress()] = std::move(I->second);
+  }
+
+  return WFM.associate(std::move(TagToWrapperFunction));
+}
+
+extern "C" Expected<MachOPlatform::InitializerSequence>
+__llvm_macho_platform_get_initializers(void *VMOP, const char *Path) {
+  assert(VMOP && "MachOPlatform instance can not be null");
+  assert(Path && "Path can not be null");
+
+  auto &MOP = *static_cast<MachOPlatform*>(VMOP);
+  auto *JD = MOP.getExecutionSession().getJITDylibByName(Path);
+  if (!JD)
+    return make_error<StringError>(Twine("No JITDylib with name ") + Path,
+                                   inconvertibleErrorCode());
+  return MOP.getInitializerSequence(*JD);
+}
+
+extern "C" Expected<JITTargetAddress>
+__llvm_macho_platform_symbol_lookup(void *VMOP, void *H, const char *Symbol) {
+  assert(VMOP && "MachOPlatform instance can not be null");
+  assert(Symbol && "Symbol can not be null");
+
+  auto &MOP = *static_cast<MachOPlatform*>(VMOP);
+  return MOP.dlsymLookup(pointerToJITTargetAddress(H), Symbol);
+}
+
+shared::WrapperFunctionResult
+MachOPlatform::rt_getInitializerSequenceWrapper(ArrayRef<uint8_t> ArgBuffer) {
+  std::string JITDylibName;
+  if (auto Err = shared::fromWrapperFunctionBlob(ArgBuffer, JITDylibName)) {
+    LLVM_DEBUG({
+        dbgs() << "Orc MachO runtime support requested initializers but request "
+                  "buffer was malformed.\n";
+      });
+    ES.reportError(std::move(Err));
+    return shared::WrapperFunctionResult();
+  }
+
+  LLVM_DEBUG({
+      dbgs() << "Orc MachO runtime support requested initializers for \""
+             << JITDylibName << "\"\n";
+    });
+
+  auto *JD = ES.getJITDylibByName(JITDylibName);
+  if (!JD) {
+    LLVM_DEBUG(dbgs() << "  No such JITDylib exists.\n");
+    return shared::WrapperFunctionResult();
+  }
+
+  auto Inits = getInitializerSequence(*JD);
+  if (!Inits) {
+    LLVM_DEBUG(dbgs() << "  Error building initializer sequence.\n");
+    ES.reportError(Inits.takeError());
+    return shared::WrapperFunctionResult();
+  }
+
+  LLVM_DEBUG(dbgs() << "  Success. Returning init sequence.\n");
+  return shared::toWrapperFunctionBlob(*Inits);
+}
+
+shared::WrapperFunctionResult
+MachOPlatform::rt_dlsymLookupWrapper(ArrayRef<uint8_t> ArgBuffer) {
+  JITTargetAddress DSOHandle;
+  std::string SymbolName;
+
+  if (auto Err = shared::fromWrapperFunctionBlob(ArgBuffer, DSOHandle,
+                                                 SymbolName)) {
+    LLVM_DEBUG({
+        dbgs() << "Orc MachO runtime support requested dlsym lookup but "
+                  "request buffer was malformed.\n";
+      });
+    ES.reportError(std::move(Err));
+    return shared::WrapperFunctionResult();
+  }
+
+  LLVM_DEBUG({
+      dbgs() << "Orc MachO runtime support requested dlsym lookup for \""
+             << SymbolName << "\" in " << formatv("{0:x}", DSOHandle) << "\n";
+    });
+
+  auto Addr = dlsymLookup(DSOHandle, SymbolName);
+  if (!Addr) {
+    LLVM_DEBUG(dbgs() << "  Lookup failed.\n");
+    ES.reportError(Addr.takeError());
+    return shared::WrapperFunctionResult();
+  }
+
+  LLVM_DEBUG({
+      dbgs() << "  Success. Returning " << formatv("{0:x}", *Addr) << "\n";
+    });
+
+  return shared::toWrapperFunctionBlob(*Addr);
+}
+
+bool MachOPlatform::supportedTarget(const Triple &TT) {
+  switch (TT.getArch()) {
+  case Triple::aarch64:
+  case Triple::x86_64:
+    return true;
+  default:
+    return false;
+  }
+}
+
+MachOPlatform::MachOPlatform(
+    ExecutionSession &ES, ObjectLinkingLayer &ObjLinkingLayer,
+    Triple TT)
+    : ES(ES), ObjLinkingLayer(ObjLinkingLayer), TT(std::move(TT)) {
+  MachOHeaderStartSymbol = ES.intern("___dso_handle");
+  ObjLinkingLayer.addPlugin(std::make_unique<InitScraperPlugin>(*this));
+}
+
+Error MachOPlatform::registerInitInfo(
+    JITDylib &JD, JITTargetAddress ObjCImageInfoAddr,
+    shared::MachOJITDylibInitializers::SectionExtent ModInits,
+    shared::MachOJITDylibInitializers::SectionExtent ObjCSelRefs,
+    shared::MachOJITDylibInitializers::SectionExtent ObjCClassList) {
+  std::lock_guard<std::mutex> Lock(InitSeqsMutex);
+
+  shared::MachOJITDylibInitializers *InitSeq = nullptr;
+  {
+    auto I = InitSeqs.find(&JD);
+    if (I == InitSeqs.end()) {
+      auto SearchOrder =
+        JD.withLinkOrderDo([](const JITDylibSearchOrder &SO) { return SO; });
+      auto JDMachOHeaderAddr = ES.lookup(SearchOrder, MachOHeaderStartSymbol);
+      if (!JDMachOHeaderAddr)
+        return JDMachOHeaderAddr.takeError();
+      I = InitSeqs.insert(
+        std::make_pair(&JD,
+                       shared::MachOJITDylibInitializers(JD.getName(),
+                                                         JDMachOHeaderAddr->getAddress())))
+            .first;
+    }
+    InitSeq = &I->second;
+  }
+
+  InitSeq->setObjCImageInfoAddr(ObjCImageInfoAddr);
+
+  if (ModInits.Address)
+    InitSeq->addModInitsSection(std::move(ModInits));
+
+  if (ObjCSelRefs.Address)
+    InitSeq->addObjCSelRefsSection(std::move(ObjCSelRefs));
+
+  if (ObjCClassList.Address)
+    InitSeq->addObjCClassListSection(std::move(ObjCClassList));
+
+  return Error::success();
+}
+
+static Expected<shared::MachOJITDylibInitializers::SectionExtent>
 getSectionExtent(jitlink::LinkGraph &G, StringRef SectionName) {
   auto *Sec = G.findSectionByName(SectionName);
   if (!Sec)
-    return MachOJITDylibInitializers::SectionExtent();
+    return shared::MachOJITDylibInitializers::SectionExtent();
   jitlink::SectionRange R(*Sec);
   if (R.getSize() % G.getPointerSize() != 0)
     return make_error<StringError>(SectionName + " section size is not a "
                                                  "multiple of the pointer size",
                                    inconvertibleErrorCode());
-  return MachOJITDylibInitializers::SectionExtent(
+  return shared::MachOJITDylibInitializers::SectionExtent(
       R.getStart(), R.getSize() / G.getPointerSize());
 }
 
@@ -301,8 +631,27 @@ void MachOPlatform::InitScraperPlugin::modifyPassConfig(
     MaterializationResponsibility &MR, const Triple &TT,
     jitlink::PassConfiguration &Config) {
 
+  // Don't add the init-scraper plugin for objects with no init symbol, or for
+  // the header start symbol.
   if (!MR.getInitializerSymbol())
     return;
+
+  if (MR.getInitializerSymbol() == MP.MachOHeaderStartSymbol) {
+    Config.PostAllocationPasses.push_back(
+        [this, &JD = MR.getTargetJITDylib()](jitlink::LinkGraph &G) -> Error {
+      auto I = llvm::find_if(G.defined_symbols(), [this](jitlink::Symbol *Sym) {
+        return Sym->getName() == *MP.MachOHeaderStartSymbol;
+      });
+      assert(I != G.defined_symbols().end() &&
+             "Missing MachO header start symbol");
+      {
+        std::lock_guard<std::mutex> Lock(MP.InitSeqsMutex);
+        MP.HeaderAddrToJITDylib[(*I)->getAddress()] = &JD;
+      }
+      return Error::success();
+    });
+    return;
+  }
 
   Config.PrePrunePasses.push_back([this, &MR](jitlink::LinkGraph &G) -> Error {
     JITLinkSymbolVector InitSectionSymbols;
@@ -323,7 +672,7 @@ void MachOPlatform::InitScraperPlugin::modifyPassConfig(
 
   Config.PostFixupPasses.push_back([this, &JD = MR.getTargetJITDylib()](
                                        jitlink::LinkGraph &G) -> Error {
-    MachOJITDylibInitializers::SectionExtent ModInits, ObjCSelRefs,
+    shared::MachOJITDylibInitializers::SectionExtent ModInits, ObjCSelRefs,
         ObjCClassList;
 
     JITTargetAddress ObjCImageInfoAddr = 0;
@@ -375,10 +724,8 @@ void MachOPlatform::InitScraperPlugin::modifyPassConfig(
         dbgs() << "none\n";
     });
 
-    MP.registerInitInfo(JD, ObjCImageInfoAddr, std::move(ModInits),
-                        std::move(ObjCSelRefs), std::move(ObjCClassList));
-
-    return Error::success();
+    return MP.registerInitInfo(JD, ObjCImageInfoAddr, std::move(ModInits),
+                               std::move(ObjCSelRefs), std::move(ObjCClassList));
   });
 }
 

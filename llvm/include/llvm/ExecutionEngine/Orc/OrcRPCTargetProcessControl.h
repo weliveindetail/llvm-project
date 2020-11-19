@@ -276,14 +276,27 @@ private:
 template <typename RPCEndpointT>
 class OrcRPCTargetProcessControlBase : public TargetProcessControl {
 public:
+
+  using PackagedWrapperFunctionCall = std::function<void()>;
+
+  using WrapperFunctionDispatcher =
+    unique_function<void(PackagedWrapperFunctionCall)>;
+
   using ErrorReporter = unique_function<void(Error)>;
 
   using OnCloseConnectionFunction = unique_function<Error(Error)>;
 
-  OrcRPCTargetProcessControlBase(std::shared_ptr<SymbolStringPool> SSP,
-                                 RPCEndpointT &EP, ErrorReporter ReportError)
-      : TargetProcessControl(std::move(SSP)),
-        ReportError(std::move(ReportError)), EP(EP) {}
+  OrcRPCTargetProcessControlBase(
+    std::shared_ptr<SymbolStringPool> SSP, RPCEndpointT &EP,
+    ErrorReporter ReportError,
+    WrapperFunctionDispatcher DispatchWrapperFunction)
+      : TargetProcessControl(std::move(SSP)), EP(EP),
+        ReportError(std::move(ReportError)),
+        DispatchWrapperFunction(std::move(DispatchWrapperFunction)) {
+    using ThisT = OrcRPCTargetProcessControlBase<RPCEndpointT>;
+    EP.template addAsyncHandler<orcrpctpc::RunWrapper>(*this,
+                                                       &ThisT::runWrapperInJIT);
+  }
 
   void reportError(Error Err) { ReportError(std::move(Err)); }
 
@@ -334,7 +347,7 @@ public:
     return EP.template callB<orcrpctpc::LookupSymbols>(RR);
   }
 
-  Expected<int32_t> runAsMain(JITTargetAddress MainFnAddr,
+  Expected<int64_t> runAsMain(JITTargetAddress MainFnAddr,
                               ArrayRef<std::string> Args) override {
     DEBUG_WITH_TYPE("orc", {
       dbgs() << "Running as main: " << formatv("{0:x16}", MainFnAddr)
@@ -354,7 +367,7 @@ public:
     return Result;
   }
 
-  Expected<tpctypes::WrapperFunctionResult>
+  Expected<shared::WrapperFunctionResult>
   runWrapper(JITTargetAddress WrapperFnAddr,
              ArrayRef<uint8_t> ArgBuffer) override {
     DEBUG_WITH_TYPE("orc", {
@@ -362,6 +375,7 @@ public:
              << formatv("{0:x16}", WrapperFnAddr) << " with "
              << formatv("{0:x16}", ArgBuffer.size()) << " argument buffer\n";
     });
+
     auto Result =
         EP.template callB<orcrpctpc::RunWrapper>(WrapperFnAddr, ArgBuffer);
     // dbgs() << "Returned from runWrapper...\n";
@@ -388,6 +402,7 @@ public:
   }
 
 protected:
+
   /// Subclasses must call this during construction to initialize the
   /// TargetTriple and PageSize members.
   Error initializeORCRPCTPCBase() {
@@ -405,8 +420,32 @@ protected:
   }
 
 private:
-  ErrorReporter ReportError;
+  Error runWrapperInJIT(
+      std::function<Error(Expected<shared::WrapperFunctionResult>)> SendResult,
+      JITTargetAddress FunctionTag, std::vector<uint8_t> ArgBuffer) {
+
+    auto PackagedCall =
+      [this, SendResult = std::move(SendResult), FunctionTag,
+       ArgBuffer = std::move(ArgBuffer)]() {
+        if (auto Result = getWrapperFunctionManager().runWrapper(
+            FunctionTag, ArgBuffer)) {
+          if (auto Err = SendResult(std::move(*Result)))
+            ReportError(std::move(Err));
+        } else {
+          auto ErrMsg = toString(Result.takeError());
+          if (auto Err = SendResult(
+              shared::WrapperFunctionResult::fromError(ErrMsg)))
+            ReportError(std::move(Err));
+        }
+      };
+
+    DispatchWrapperFunction(std::move(PackagedCall));
+    return Error::success();
+  }
+
   RPCEndpointT &EP;
+  ErrorReporter ReportError;
+  WrapperFunctionDispatcher DispatchWrapperFunction;
 };
 
 } // end namespace orc

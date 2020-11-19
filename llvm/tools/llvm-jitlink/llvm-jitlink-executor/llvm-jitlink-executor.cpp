@@ -14,10 +14,14 @@
 #include "llvm/ExecutionEngine/Orc/Shared/FDRawByteChannel.h"
 #include "llvm/ExecutionEngine/Orc/TargetProcess/OrcRPCTPCServer.h"
 #include "llvm/ExecutionEngine/Orc/TargetProcess/RegisterEHFrames.h"
+#include "llvm/ExecutionEngine/Orc/TargetProcess/TargetExecutionUtils.h"
 #include "llvm/Support/DynamicLibrary.h"
 #include "llvm/Support/Error.h"
 #include "llvm/Support/raw_ostream.h"
+
+#include <future>
 #include <sstream>
+#include <thread>
 
 #ifdef LLVM_ON_UNIX
 
@@ -28,6 +32,10 @@
 
 using namespace llvm;
 using namespace llvm::orc;
+
+using JITLinkExecutorEndpoint =
+    shared::MultiThreadedRPCEndpoint<shared::FDRawByteChannel>;
+using JITLinkExecutorServer = OrcRPCTPCServer<JITLinkExecutorEndpoint>;
 
 ExitOnError ExitOnErr;
 
@@ -77,6 +85,20 @@ int openListener(std::string Host, int Port) {
 #endif
 }
 
+extern "C" JITLinkExecutorServer *__orc_rt_jit_dispatch_remote_ctx = 0;
+extern "C" LLVMOrcSharedCWrapperFunctionResult
+__orc_rt_jit_dispatch_remote(void *Ctx, const void *FunctionTag,
+                             const uint8_t *Data, size_t Size) {
+  auto FnId = pointerToJITTargetAddress(FunctionTag);
+  auto Result = (*static_cast<JITLinkExecutorServer **>(Ctx))
+      ->runWrapperInJIT(FnId, { Data, Size });
+  if (!Result) {
+    auto ErrMsg = toString(Result.takeError());
+    return shared::WrapperFunctionResult::fromError(ErrMsg).release();
+  }
+  return Result->release();
+}
+
 int main(int argc, char *argv[]) {
 
   ExitOnErr.setBanner(std::string(argv[0]) + ": ");
@@ -119,10 +141,40 @@ int main(int argc, char *argv[]) {
 
   shared::FDRawByteChannel C(InFD, OutFD);
   JITLinkExecutorEndpoint EP(C, true);
-  OrcRPCTPCServer<JITLinkExecutorEndpoint> Server(EP);
-  Server.setProgramName(std::string("llvm-jitlink-executor"));
 
-  ExitOnErr(Server.run());
+  struct MainInvocation {
+    std::function<Error(Expected<int64_t>)> SendResult;
+    JITTargetAddress MainAddr;
+    std::vector<std::string> Args;
+  };
+
+  auto MIP = std::make_unique<std::promise<MainInvocation>>();
+  auto MIF = MIP->get_future();
+
+  JITLinkExecutorServer Server(
+      EP, [&](std::function<Error(Expected<int64_t>)> SendResult,
+              JITTargetAddress MainAddr, std::vector<std::string> Args) {
+        if (MIP) {
+          MIP->set_value({std::move(SendResult), MainAddr, std::move(Args)});
+          MIP = nullptr;
+        } else
+          ExitOnErr(SendResult(make_error<StringError>(
+              "runMain already invoked", inconvertibleErrorCode())));
+        return Error::success();
+      });
+  __orc_rt_jit_dispatch_remote_ctx = &Server;
+
+  std::thread ListenerThread([&]() { ExitOnErr(Server.run()); });
+
+  auto MI = MIF.get();
+
+  using MainTy = int (*)(int, char *[]);
+  int64_t Result = runAsMain(jitTargetAddressToPointer<MainTy>(MI.MainAddr),
+                             MI.Args, StringRef("llvm-jitlink-executor"));
+
+  ExitOnErr(MI.SendResult(Result));
+
+  ListenerThread.join();
 
   return 0;
 }

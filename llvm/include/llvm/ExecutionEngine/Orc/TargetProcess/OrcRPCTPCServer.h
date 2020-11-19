@@ -136,11 +136,6 @@ public:
   static const char *getName() { return "ReleaseOrFinalizeMemRequestElement"; }
 };
 
-template <> class SerializationTypeName<tpctypes::WrapperFunctionResult> {
-public:
-  static const char *getName() { return "WrapperFunctionResult"; }
-};
-
 template <typename ChannelT, typename WriteT>
 class SerializationTraits<
     ChannelT, WriteT, WriteT,
@@ -230,45 +225,6 @@ public:
                            orcrpctpc::ReleaseOrFinalizeMemRequestElement &E) {
     return deserializeSeq(C, *reinterpret_cast<uint8_t *>(&E.Prot), E.Address,
                           E.Size);
-  }
-};
-
-template <typename ChannelT>
-class SerializationTraits<
-    ChannelT, tpctypes::WrapperFunctionResult, tpctypes::WrapperFunctionResult,
-    std::enable_if_t<std::is_base_of<RawByteChannel, ChannelT>::value>> {
-public:
-  static Error serialize(ChannelT &C,
-                         const tpctypes::WrapperFunctionResult &E) {
-    auto Data = E.getData();
-    if (auto Err = serializeSeq(C, static_cast<uint64_t>(Data.size())))
-      return Err;
-    if (Data.size() == 0)
-      return Error::success();
-    return C.appendBytes(reinterpret_cast<const char *>(Data.data()),
-                         Data.size());
-  }
-
-  static Error deserialize(ChannelT &C, tpctypes::WrapperFunctionResult &E) {
-    tpctypes::CWrapperFunctionResult R;
-
-    R.Size = 0;
-    R.Data.ValuePtr = nullptr;
-    R.Destroy = nullptr;
-
-    if (auto Err = deserializeSeq(C, R.Size))
-      return Err;
-    if (R.Size == 0)
-      return Error::success();
-    R.Data.ValuePtr = new uint8_t[R.Size];
-    if (auto Err =
-            C.readBytes(reinterpret_cast<char *>(R.Data.ValuePtr), R.Size)) {
-      R.Destroy = tpctypes::WrapperFunctionResult::destroyWithDeleteArray;
-      return Err;
-    }
-
-    E = tpctypes::WrapperFunctionResult(R);
-    return Error::success();
   }
 };
 
@@ -364,7 +320,7 @@ public:
 
 class RunMain
     : public shared::RPCFunction<RunMain,
-                                 int32_t(JITTargetAddress MainAddr,
+                                 int64_t(JITTargetAddress MainAddr,
                                          std::vector<std::string> Args)> {
 public:
   static const char *getName() { return "RunMain"; }
@@ -372,7 +328,7 @@ public:
 
 class RunWrapper
     : public shared::RPCFunction<RunWrapper,
-                                 tpctypes::WrapperFunctionResult(
+                                 shared::WrapperFunctionResult(
                                      JITTargetAddress, std::vector<uint8_t>)> {
 public:
   static const char *getName() { return "RunWrapper"; }
@@ -388,8 +344,14 @@ public:
 /// TargetProcessControl for a process connected via an ORC RPC Endpoint.
 template <typename RPCEndpointT> class OrcRPCTPCServer {
 public:
+  using RunMainDispatcher =
+      std::function<Error(std::function<Error(Expected<int64_t>)> SendResult,
+                          JITTargetAddress MainAddr, std::vector<std::string>)>;
+
   /// Create an OrcRPCTPCServer from the given endpoint.
-  OrcRPCTPCServer(RPCEndpointT &EP) : EP(EP) {
+  OrcRPCTPCServer(RPCEndpointT &EP,
+                  RunMainDispatcher DispatchRunMain = RunMainDispatcher())
+      : EP(EP) {
     using ThisT = OrcRPCTPCServer<RPCEndpointT>;
 
     TripleStr = sys::getProcessTriple();
@@ -398,7 +360,6 @@ public:
     EP.template addHandler<orcrpctpc::GetTargetTriple>(*this,
                                                        &ThisT::getTargetTriple);
     EP.template addHandler<orcrpctpc::GetPageSize>(*this, &ThisT::getPageSize);
-
     EP.template addHandler<orcrpctpc::ReserveMem>(*this, &ThisT::reserveMemory);
     EP.template addHandler<orcrpctpc::FinalizeMem>(*this,
                                                    &ThisT::finalizeMemory);
@@ -418,18 +379,26 @@ public:
     EP.template addHandler<orcrpctpc::LookupSymbols>(*this,
                                                      &ThisT::lookupSymbols);
 
-    EP.template addHandler<orcrpctpc::RunMain>(*this, &ThisT::runMain);
+    if (DispatchRunMain)
+      EP.template addAsyncHandler<orcrpctpc::RunMain>(
+          std::move(DispatchRunMain));
+    else
+      EP.template addHandler<orcrpctpc::RunMain>(*this, &ThisT::runMain);
+
     EP.template addHandler<orcrpctpc::RunWrapper>(*this, &ThisT::runWrapper);
 
     EP.template addHandler<orcrpctpc::CloseConnection>(*this,
                                                        &ThisT::closeConnection);
   }
 
-  /// Set the ProgramName to be used as the first argv element when running
+  /// Set the program name to be used as the first argv element when running
   /// functions via runAsMain.
   void setProgramName(Optional<std::string> ProgramName = None) {
     this->ProgramName = std::move(ProgramName);
   }
+
+  /// Returns the program name.
+  const Optional<std::string> &getProgramName() const { return ProgramName; }
 
   /// Get the RPC endpoint for this server.
   RPCEndpointT &getEndpoint() { return EP; }
@@ -441,6 +410,11 @@ public:
         return Err;
     }
     return Error::success();
+  }
+
+  Expected<shared::WrapperFunctionResult>
+  runWrapperInJIT(JITTargetAddress FunctionId, ArrayRef<uint8_t> ArgBuffer) {
+    return EP.template callB<orcrpctpc::RunWrapper>(FunctionId, ArgBuffer);
   }
 
 private:
@@ -584,7 +558,7 @@ private:
     return Result;
   }
 
-  int32_t runMain(JITTargetAddress MainFnAddr,
+  int64_t runMain(JITTargetAddress MainFnAddr,
                   const std::vector<std::string> &Args) {
     Optional<StringRef> ProgramNameOverride;
     if (ProgramName)
@@ -595,13 +569,14 @@ private:
         ProgramNameOverride);
   }
 
-  tpctypes::WrapperFunctionResult
+  shared::WrapperFunctionResult
   runWrapper(JITTargetAddress WrapperFnAddr,
              const std::vector<uint8_t> &ArgBuffer) {
-    using WrapperFnTy = tpctypes::CWrapperFunctionResult (*)(
-        const uint8_t *Data, uint64_t Size);
+    using WrapperFnTy = LLVMOrcSharedCWrapperFunctionResult (*)(
+        const char *Data, uint64_t Size);
     auto *WrapperFn = jitTargetAddressToFunction<WrapperFnTy>(WrapperFnAddr);
-    return WrapperFn(ArgBuffer.data(), ArgBuffer.size());
+    return WrapperFn(reinterpret_cast<const char*>(ArgBuffer.data()),
+                     ArgBuffer.size());
   }
 
   void closeConnection() { Finished = true; }

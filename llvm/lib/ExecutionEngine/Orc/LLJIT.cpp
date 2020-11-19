@@ -90,10 +90,6 @@ public:
   Error setupJITDylib(JITDylib &JD) override;
   Error notifyAdding(ResourceTracker &RT,
                      const MaterializationUnit &MU) override;
-  Error notifyRemoving(ResourceTracker &RT) override {
-    // Noop -- Nothing to do (yet).
-    return Error::success();
-  }
 
 private:
   GenericLLVMIRPlatformSupport &S;
@@ -545,8 +541,16 @@ public:
     if (auto Err = hookUpFunction(DlFcn.dlerror, "dlerror"))
       return std::move(Err);
 
+    auto PForm =
+      MachOPlatform::Create(
+          J.getExecutionSession(),
+          static_cast<ObjectLinkingLayer &>(J.getObjLinkingLayer()),
+          J.getTargetTriple());
+    if (!PForm)
+      return PForm.takeError();
+
     std::unique_ptr<MachOPlatformSupport> MP(
-        new MachOPlatformSupport(J, PlatformJITDylib, DlFcn));
+      new MachOPlatformSupport(J, std::move(*PForm), PlatformJITDylib, DlFcn));
     return std::move(MP);
   }
 
@@ -563,25 +567,24 @@ public:
     // If ObjC is not enabled but there are JIT'd ObjC inits then return
     // an error.
     if (!objCRegistrationEnabled())
-      for (auto &KV : *InitSeq) {
-        if (!KV.second.getObjCSelRefsSections().empty() ||
-            !KV.second.getObjCClassListSections().empty())
-          return make_error<StringError>("JITDylib " + KV.first->getName() +
-                                             " contains objc metadata but objc"
-                                             " is not enabled",
+      for (auto &IS : *InitSeq) {
+        if (!IS.getObjCSelRefsSections().empty() ||
+            !IS.getObjCClassListSections().empty())
+          return make_error<StringError>("Initializers object contains objc "
+                                         "metadata but objc is not enabled",
                                          inconvertibleErrorCode());
       }
 
     // Run the initializers.
-    for (auto &KV : *InitSeq) {
+    for (auto &IS : *InitSeq) {
       if (objCRegistrationEnabled()) {
-        KV.second.registerObjCSelectors();
-        if (auto Err = KV.second.registerObjCClasses()) {
+        MP.registerObjCSelectors(IS);
+        if (auto Err = MP.registerObjCClasses(IS)) {
           // FIXME: Roll back registrations on error?
           return Err;
         }
       }
-      KV.second.runModInits();
+      MP.runModInits(IS);
     }
 
     return Error::success();
@@ -589,13 +592,16 @@ public:
 
   Error deinitialize(JITDylib &JD) override {
     auto &ES = J.getExecutionSession();
+    auto DeInitJDs = JD.getDFSLinkOrder();
+    size_t DeInitJDIdx = 0;
     if (auto DeinitSeq = MP.getDeinitializerSequence(JD)) {
-      for (auto &KV : *DeinitSeq) {
+      for (auto &DS : *DeinitSeq) {
         auto DSOHandleName = ES.intern("___dso_handle");
-
+        auto &JD = DeInitJDs[DeInitJDIdx++];
         // FIXME: Run DeInits here.
+        (void)DS;
         auto Result = ES.lookup(
-            {{KV.first, JITDylibLookupFlags::MatchAllSymbols}},
+            {{JD.get(), JITDylibLookupFlags::MatchAllSymbols}},
             SymbolLookupSet(DSOHandleName,
                             SymbolLookupFlags::WeaklyReferencedSymbol));
         if (!Result)
@@ -628,8 +634,11 @@ private:
                                    inconvertibleErrorCode());
   }
 
-  MachOPlatformSupport(LLJIT &J, JITDylib &PlatformJITDylib, DlFcnValues DlFcn)
-      : J(J), MP(setupPlatform(J)), DlFcn(std::move(DlFcn)) {
+  MachOPlatformSupport(LLJIT &J, std::unique_ptr<MachOPlatform> PForm,
+                       JITDylib &PlatformJITDylib, DlFcnValues DlFcn)
+      : J(J), MP(*PForm), DlFcn(std::move(DlFcn)) {
+
+    J.getExecutionSession().setPlatform(std::move(PForm));
 
     SymbolMap HelperSymbols;
 
@@ -661,31 +670,6 @@ private:
         PlatformJITDylib.define(absoluteSymbols(std::move(HelperSymbols))));
     cantFail(MP.setupJITDylib(J.getMainJITDylib()));
     cantFail(J.addIRModule(PlatformJITDylib, createPlatformRuntimeModule()));
-  }
-
-  static MachOPlatform &setupPlatform(LLJIT &J) {
-    auto Tmp = std::make_unique<MachOPlatform>(
-        J.getExecutionSession(),
-        static_cast<ObjectLinkingLayer &>(J.getObjLinkingLayer()),
-        createStandardSymbolsObject(J));
-    auto &MP = *Tmp;
-    J.getExecutionSession().setPlatform(std::move(Tmp));
-    return MP;
-  }
-
-  static std::unique_ptr<MemoryBuffer> createStandardSymbolsObject(LLJIT &J) {
-    LLVMContext Ctx;
-    Module M("__standard_symbols", Ctx);
-    M.setDataLayout(J.getDataLayout());
-
-    auto *Int64Ty = Type::getInt64Ty(Ctx);
-
-    auto *DSOHandle =
-        new GlobalVariable(M, Int64Ty, true, GlobalValue::ExternalLinkage,
-                           ConstantInt::get(Int64Ty, 0), "__dso_handle");
-    DSOHandle->setVisibility(GlobalValue::DefaultVisibility);
-
-    return cantFail(J.getIRCompileLayer().getCompiler()(M));
   }
 
   ThreadSafeModule createPlatformRuntimeModule() {
