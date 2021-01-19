@@ -45,7 +45,7 @@ endforeach()
 include_directories(..)
 include_directories(../../include)
 
-set(ORC_CFLAGS ${COMPILER_RT_COMMON_CFLAGS})
+set(ORC_CFLAGS ${COMPILER_RT_COMMON_CFLAGS} -fno-rtti)
 
 add_compiler_rt_component(orc)
 
