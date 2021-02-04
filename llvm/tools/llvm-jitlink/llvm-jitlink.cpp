@@ -50,6 +50,8 @@
 #include <unistd.h>
 #endif // LLVM_ON_UNIX
 
+#include "llvm-jitlink-config.h"
+
 #define DEBUG_TYPE "llvm_jitlink"
 
 using namespace llvm;
@@ -155,10 +157,10 @@ static cl::opt<std::string> OutOfProcessExecutorConnect(
     "oop-executor-connect",
     cl::desc("Connect to an out-of-process executor via TCP"));
 
-// TODO: Default to false if compiler-rt is not built.
-static cl::opt<bool> UseOrcRuntime("use-orc-runtime",
-                                   cl::desc("Do not required/load ORC runtime"),
-                                   cl::init(true));
+static cl::opt<bool>
+    UseOrcRuntime("use-orc-runtime",
+                  cl::desc("Do not required/load ORC runtime"),
+                  cl::init(LLVM_JITLINK_USE_ORC_RUNTIME_DEFAULT));
 
 static cl::opt<std::string>
     OrcRuntimePath("orc-runtime-path", cl::desc("Add orc runtime to session"),
@@ -1101,7 +1103,14 @@ static Error sanitizeArguments(const Triple &TT, const char *ArgV0) {
                         "lib/clang/12.0.0/lib/darwin/libclang_rt.orc_osx.a");
       OrcRuntimePath = DefaultOrcRuntimePath.str().str();
     }
+
+    if (!sys::fs::exists(OrcRuntimePath))
+      return make_error<StringError>(
+          formatv("Cannot find static archive for ORC runtime: {0}",
+                  OrcRuntimePath),
+          inconvertibleErrorCode());
   }
+
   return Error::success();
 }
 
