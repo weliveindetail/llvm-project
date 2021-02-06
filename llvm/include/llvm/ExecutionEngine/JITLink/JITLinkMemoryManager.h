@@ -105,14 +105,28 @@ public:
   /// The request argument describes the segment sizes and permisssions being
   /// requested.
   virtual Expected<std::unique_ptr<Allocation>>
-  allocate(const JITLinkDylib *JD, const SegmentsRequestMap &Request) = 0;
+  allocate(const JITLinkDylib *JD, const SegmentsRequestMap &Request,
+           sys::MemoryBlock *NearBlock = nullptr) = 0;
+
+  void setNearBlock(sys::MemoryBlock Block) {
+    NearBlock = std::move(Block);
+  }
+
+  const sys::MemoryBlock *nearBlock() const {
+    bool Unset = NearBlock.base() == nullptr && NearBlock.allocatedSize() == 0;
+    return Unset ? nullptr : &NearBlock;
+  }
+
+private:
+  sys::MemoryBlock NearBlock;
 };
 
 /// A JITLinkMemoryManager that allocates in-process memory.
 class InProcessMemoryManager : public JITLinkMemoryManager {
 public:
   Expected<std::unique_ptr<Allocation>>
-  allocate(const JITLinkDylib *JD, const SegmentsRequestMap &Request) override;
+  allocate(const JITLinkDylib *JD, const SegmentsRequestMap &Request,
+           sys::MemoryBlock *NearBlock = nullptr) override;
 };
 
 } // end namespace jitlink

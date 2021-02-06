@@ -10,6 +10,8 @@
 
 #include "llvm/ADT/Optional.h"
 #include "llvm/ExecutionEngine/JITLink/EHFrameSupport.h"
+#include "llvm/ExecutionEngine/JITLink/JITLink.h"
+#include "llvm/Support/Process.h"
 
 #include <vector>
 
@@ -96,7 +98,7 @@ public:
               });
   }
 
-  Error notifyResolved(LinkGraph &G) override {
+  Error notifyResolved(LinkGraph &G, const SegmentLayoutMap &Layout) override {
     auto &ES = Layer.getExecutionSession();
 
     SymbolFlagsMap ExtraSymbolsToClaim;
@@ -190,7 +192,14 @@ public:
     if (auto Err = MR->notifyResolved(InternedResult))
       return Err;
 
-    Layer.notifyLoaded(*MR);
+    ObjectLinkingLayer::GetDebugObjCallback GetDebugObjFunc = nullptr;
+    if (ObjBuffer && G.canPrepareObjectForDebug())
+      GetDebugObjFunc = [&]() {
+        return transformDebugObj(*ObjBuffer, G, Layout);
+      };
+
+    Layer.notifyLoaded(*MR, GetDebugObjFunc);
+
     return Error::success();
   }
 
@@ -430,9 +439,66 @@ private:
     }
   }
 
+  Expected<MutableArrayRef<char>> allocateDebugObj(StringRef ObjMem) {
+    assert(ObjBuffer && "If we have no associated object buffer we shouldn't be here");
+
+    // We can only call this one for each linking context (so far).
+    if (DebugObjAlloc)
+      return make_error<StringError>(
+          formatv("Failed to initialize debug object: JITLinkContext for has "
+                  "an associated debug object already"),
+          inconvertibleErrorCode());
+
+    sys::MemoryBlock NearBlock(const_cast<char *>(ObjMem.data()), ObjMem.size());
+
+    unsigned PageSize = sys::Process::getPageSizeEstimate();
+    unsigned ReadWrite = sys::Memory::MF_READ | sys::Memory::MF_WRITE;
+
+    JITLinkMemoryManager::SegmentsRequestMap SegmentsMap{
+      {ReadWrite, {PageSize, ObjMem.size(), 0}}
+    };
+    Expected<std::unique_ptr<JITLinkMemoryManager::Allocation>> AllocOrErr =
+        Layer.MemMgr.allocate(&MR->getTargetJITDylib(), SegmentsMap, &NearBlock);
+    if (!AllocOrErr)
+      return AllocOrErr.takeError();
+    DebugObjAlloc = std::move(*AllocOrErr);
+
+    MutableArrayRef<char> DebugObjMem = DebugObjAlloc->getWorkingMemory(
+        static_cast<sys::Memory::ProtectionFlags>(ReadWrite));
+    memcpy(DebugObjMem.data(), ObjMem.data(), ObjMem.size());
+
+    return DebugObjMem;
+  }
+
+  Expected<std::unique_ptr<MemoryBuffer>> transformDebugObj(
+      const MemoryBuffer &ObjBuffer, const LinkGraph &G,
+      const SegmentLayoutMap &Layout) {
+
+    Expected<MutableArrayRef<char>> DebugObjMem =
+        allocateDebugObj(ObjBuffer.getBuffer());
+    if (!DebugObjMem)
+      return DebugObjMem.takeError();
+
+    std::map<StringRef, JITTargetAddress> SectionLoadAddresses;
+    for (auto &KV : Layout) {
+      for (Block *B : KV.second.ContentBlocks)
+        SectionLoadAddresses[B->getSection().getName()] = B->getAddress();
+      for (Block *B : KV.second.ZeroFillBlocks)
+        SectionLoadAddresses[B->getSection().getName()] = B->getAddress();
+    }
+
+    if (Error Err = G.prepareObjectForDebug(*DebugObjMem, SectionLoadAddresses))
+      return std::move(Err);
+
+    StringRef Name = ObjBuffer.getBufferIdentifier();
+    StringRef MemRange(DebugObjMem->data(), DebugObjMem->size());
+    return MemoryBuffer::getMemBuffer(MemRange, Name, false);
+  }
+
   ObjectLinkingLayer &Layer;
   std::unique_ptr<MaterializationResponsibility> MR;
   std::unique_ptr<MemoryBuffer> ObjBuffer;
+  std::unique_ptr<JITLinkMemoryManager::Allocation> DebugObjAlloc;
   DenseMap<SymbolStringPtr, SymbolNameSet> ExternalNamedSymbolDeps;
   DenseMap<SymbolStringPtr, SymbolNameSet> InternalNamedSymbolDeps;
 };
@@ -462,7 +528,7 @@ void ObjectLinkingLayer::emit(std::unique_ptr<MaterializationResponsibility> R,
   auto ObjBuffer = O->getMemBufferRef();
   auto Ctx = std::make_unique<ObjectLinkingLayerJITLinkContext>(
       *this, std::move(R), std::move(O));
-  if (auto G = createLinkGraphFromObject(std::move(ObjBuffer)))
+  if (auto G = createLinkGraphFromObject(ObjBuffer))
     link(std::move(*G), std::move(Ctx));
   else
     Ctx->notifyFailed(G.takeError());
@@ -481,9 +547,10 @@ void ObjectLinkingLayer::modifyPassConfig(MaterializationResponsibility &MR,
     P->modifyPassConfig(MR, TT, PassConfig);
 }
 
-void ObjectLinkingLayer::notifyLoaded(MaterializationResponsibility &MR) {
+void ObjectLinkingLayer::notifyLoaded(MaterializationResponsibility &MR,
+                                      GetDebugObjCallback GetDebugObj) {
   for (auto &P : Plugins)
-    P->notifyLoaded(MR);
+    P->notifyLoaded(MR, GetDebugObj);
 }
 
 Error ObjectLinkingLayer::notifyEmitted(MaterializationResponsibility &MR,

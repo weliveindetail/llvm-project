@@ -13,8 +13,11 @@
 //===----------------------------------------------------------------------===//
 
 #include "llvm-jitlink.h"
+#include "llvm-jitlink-config.h"
+#include "llvm-jitlink-gdb-loader.h"
 
 #include "llvm/BinaryFormat/Magic.h"
+#include "llvm/ExecutionEngine/JITEventListener.h"
 #include "llvm/ExecutionEngine/Orc/DebugUtils.h"
 #include "llvm/ExecutionEngine/Orc/ExecutionUtils.h"
 #include "llvm/ExecutionEngine/Orc/MachOPlatform.h"
@@ -49,8 +52,6 @@
 #include <sys/socket.h>
 #include <unistd.h>
 #endif // LLVM_ON_UNIX
-
-#include "llvm-jitlink-config.h"
 
 #define DEBUG_TYPE "llvm_jitlink"
 
@@ -148,6 +149,11 @@ static cl::opt<bool> PhonyExternals(
     "phony-externals",
     cl::desc("resolve all otherwise unresolved externals to null"),
     cl::init(false));
+
+static cl::opt<bool>
+    WaitForDebugger("wait-for-debugger",
+                    cl::desc("Wait for user input before running run code"),
+                    cl::init(false));
 
 static cl::opt<std::string> OutOfProcessExecutor(
     "oop-executor", cl::desc("Launch an out-of-process executor to run code"),
@@ -343,7 +349,8 @@ public:
   }
 
   Expected<std::unique_ptr<JITLinkMemoryManager::Allocation>>
-  allocate(const JITLinkDylib *JD, const SegmentsRequestMap &Request) override {
+  allocate(const JITLinkDylib *JD, const SegmentsRequestMap &Request,
+           sys::MemoryBlock *NearBlock = nullptr) override {
 
     using AllocationMap = DenseMap<unsigned, sys::MemoryBlock>;
 
@@ -651,6 +658,12 @@ LLVMJITLinkRemoteTargetProcessControl::LaunchExecutor() {
   close(ToExecutor[ReadEnd]);
   close(FromExecutor[WriteEnd]);
 
+  if (WaitForDebugger) {
+    llvm::outs() << "Executor process launched with PID: " << ChildPID << "\n";
+    llvm::outs() << "Attach lldb and press any key to continue.\n";
+    getchar();
+  }
+
   // Return an RPC channel connected to our end of the pipes.
   auto SSP = std::make_shared<SymbolStringPool>();
   auto Channel = std::make_unique<shared::FDRawByteChannel>(
@@ -778,10 +791,17 @@ Expected<std::unique_ptr<Session>> Session::Create(Triple TT) {
       TPC = std::move(*RTPC);
     else
       return RTPC.takeError();
-  } else
+  } else {
     TPC = std::make_unique<SelfTargetProcessControl>(
         std::make_shared<SymbolStringPool>(), std::move(TT), *PageSize,
         createMemoryManager());
+
+    if (WaitForDebugger) {
+      llvm::outs() << "JITing in-process, PID is: " << getpid() << "\n";
+      llvm::outs() << "Attach lldb and press any key to continue.\n";
+      getchar();
+    }
+  }
 
   Error Err = Error::success();
   std::unique_ptr<Session> S(new Session(std::move(TPC), Err));
@@ -830,6 +850,7 @@ Session::Session(std::unique_ptr<TargetProcessControl> TPC, Error &Err)
         ES, ExitOnErr(TPCEHFrameRegistrar::Create(*this->TPC))));
 
   ObjLayer.addPlugin(std::make_unique<JITLinkSessionPlugin>(*this));
+  ObjLayer.addPlugin(std::make_unique<JITLinkGDBLoaderPlugin>());
 
   if (this->TPC->getTargetTriple().isOSBinFormatMachO() && UseOrcRuntime) {
 

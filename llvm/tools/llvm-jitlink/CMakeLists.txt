@@ -22,6 +22,7 @@ add_llvm_tool(llvm-jitlink
   llvm-jitlink.cpp
   llvm-jitlink-elf.cpp
   llvm-jitlink-macho.cpp
+  llvm-jitlink-gdb-loader.cpp
   )
 
 # If compiler-rt is enabled in this build and the ORC runtime target

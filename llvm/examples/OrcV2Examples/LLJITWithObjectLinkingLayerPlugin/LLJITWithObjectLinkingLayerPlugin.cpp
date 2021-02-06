@@ -63,7 +63,8 @@ public:
     });
   }
 
-  void notifyLoaded(MaterializationResponsibility &MR) override {
+  void notifyLoaded(MaterializationResponsibility &MR,
+                    MemoryBufferRef ObjBuffer) override {
     dbgs() << "Loading object defining " << MR.getSymbols() << "\n";
   }
 

@@ -536,7 +536,8 @@ public:
 
     Expected<std::unique_ptr<Allocation>>
     allocate(const jitlink::JITLinkDylib *JD,
-             const SegmentsRequestMap &Request) override {
+             const SegmentsRequestMap &Request,
+             sys::MemoryBlock *NearBlock = nullptr) override {
       return RPCMMAlloc::Create(Client, Id, Request);
     }
 

@@ -15,6 +15,7 @@
 #include "JITLinkGeneric.h"
 #include "llvm/ExecutionEngine/JITLink/JITLink.h"
 #include "llvm/Object/ELFObjectFile.h"
+#include "llvm/Object/SymbolicFile.h"
 #include "llvm/Support/Endian.h"
 
 #define DEBUG_TYPE "jitlink"
@@ -191,6 +192,14 @@ static Error optimizeELF_x86_64_GOTAndStubs(LinkGraph &G) {
 
   return Error::success();
 }
+
+// All section names with the prefix .debug are reserved for future use.
+static bool isDebugSection(StringRef SectionName) {
+  return SectionName.startswith(".debug") ||
+         SectionName.startswith(".rel.debug") ||
+         SectionName.startswith(".rela.debug");
+}
+
 namespace llvm {
 namespace jitlink {
 
@@ -327,9 +336,9 @@ private:
       (void)Flags;
 
       LLVM_DEBUG({
-        dbgs() << "  " << *Name << ": " << formatv("{0:x16}", Address) << " -- "
-               << formatv("{0:x16}", Address + Size) << ", align: " << Alignment
-               << " Flags: " << formatv("{0:x}", Flags) << "\n";
+        dbgs() << 
+            formatv("  {0}: {1:x16} -- {2:x16}, align: {3}, flags: {4:x}\n",
+                    *Name, Address, Address + Size, Alignment, Flags);
       });
 
       if (SecRef.sh_type != ELF::SHT_NOBITS) {
@@ -375,6 +384,10 @@ private:
         return RelSectName.takeError();
       // Deal with .eh_frame later
       if (*RelSectName == StringRef(".rela.eh_frame"))
+        continue;
+
+      // Debug sections will be relocated by the debugger.
+      if (isDebugSection(*RelSectName))
         continue;
 
       auto UpdateSection = Obj.getSection(SecRef.sh_info);
@@ -575,7 +588,8 @@ public:
                              const object::ELFFile<object::ELF64LE> &Obj)
       : G(std::make_unique<LinkGraph>(FileName.str(),
                                       Triple("x86_64-unknown-linux"),
-                                      getPointerSize(Obj), getEndianness(Obj))),
+                                      getPointerSize(Obj), getEndianness(Obj),
+                                      &patchSectionLoadAddressesInELFObject_x86_64)),
         Obj(Obj) {}
 
   Expected<std::unique_ptr<LinkGraph>> buildGraph() {
@@ -604,6 +618,8 @@ public:
 
     return std::move(G);
   }
+
+  std::unique_ptr<object::ObjectFile> getObjectForDebug();
 };
 
 class ELFJITLinker_x86_64 : public JITLinker<ELFJITLinker_x86_64> {
@@ -661,6 +677,59 @@ createLinkGraphFromELFObject_x86_64(MemoryBufferRef ObjectBuffer) {
       .buildGraph();
 }
 
+LLVM_ELF_IMPORT_TYPES_ELFT(object::ELF64LE)
+
+Error patchSectionLoadAddressesInELFObject_x86_64(
+        MutableArrayRef<char> ObjBufferMem,
+        const jitlink::NameAddrMap &SectionsInTargetMemory) {
+
+  MemoryBufferRef ObjectBuffer(StringRef(ObjBufferMem.data(), ObjBufferMem.size()), "");
+  auto ELFObj = object::ObjectFile::createELFObjectFile(ObjectBuffer);
+  if (!ELFObj)
+    return ELFObj.takeError();
+
+  auto &ELFObjFile = cast<object::ELFObjectFile<object::ELF64LE>>(**ELFObj);
+  const object::ELFFile<object::ELF64LE> &Obj = ELFObjFile.getELFFile();
+
+  auto Sections = Obj.sections();
+  if (!Sections)
+    return Sections.takeError();
+
+  for (auto &SecRef : *Sections) {
+    assert(SecRef.sh_addr == 0 && "Section load-address set already");
+    StringRef Name = cantFail(Obj.getSectionName(SecRef));
+    if (!isDebugSection(Name)) {
+      auto It = SectionsInTargetMemory.find(Name);
+      if (It != SectionsInTargetMemory.end()) {
+        // Gain write access.
+        Elf_Shdr *shdr = const_cast<Elf_Shdr *>(
+            reinterpret_cast<const Elf_Shdr *>(&SecRef));
+
+        auto Addr = static_cast<object::ELF64LE::uint>(It->second);
+        shdr->sh_addr = Addr;
+
+        // TODO: Is that check correct if WorkingMem != TargetMem?
+        int64_t Dist = static_cast<uint64_t>(reinterpret_cast<uintptr_t>(&shdr->sh_addr)) -
+                      static_cast<uint64_t>(Addr);
+        assert(std::abs(Dist) < UINT32_MAX &&
+              "Out of bounds for 32 bit debug relocations");
+      }
+    }
+  }
+
+  {
+    dbgs() << "Updated section load-addresses...\n";
+    for (auto &SecRef : *Sections) {
+      if (SecRef.sh_addr) {
+        StringRef Name = cantFail(Obj.getSectionName(SecRef));
+        dbgs() << formatv("  {1:x16} {0}\n", Name, static_cast<object::ELF64LE::uint>(SecRef.sh_addr));
+      }
+    }
+  }
+
+  return Error::success();
+}
+
 void link_ELF_x86_64(std::unique_ptr<LinkGraph> G,
                      std::unique_ptr<JITLinkContext> Ctx) {
   PassConfiguration Config;
@@ -701,5 +770,53 @@ StringRef getELFX86RelocationKindName(Edge::Kind R) {
   }
   return getGenericEdgeKindName(static_cast<Edge::Kind>(R));
 }
+
+std::unique_ptr<object::ObjectFile>
+ELFLinkGraphBuilder_x86_64::getObjectForDebug() {
+  dbgs() << "Section Load Addresses\n";
+  for (auto &SecRef : sections) {
+    uint64_t Address = SecRef.sh_addr;
+    StringRef Name = cantFail(Obj.getSectionName(SecRef));
+    dbgs() << formatv("{0}: {1:x16}\n", Name, Address);
+  }
+
+  return nullptr;
+
+//  typedef typename ELFT::Shdr Elf_Shdr;
+//  typedef typename ELFT::uint addr_type;
+//
+//  Expected<std::unique_ptr<DyldELFObject<ELFT>>> ObjOrErr =
+//      DyldELFObject<ELFT>::create(Buffer);
+//  if (Error E = ObjOrErr.takeError())
+//    return std::move(E);
+//
+//  std::unique_ptr<DyldELFObject<ELFT>> Obj = std::move(*ObjOrErr);
+//
+//  // Iterate over all sections in the object.
+//  auto SI = SourceObject.section_begin();
+//  for (const auto &Sec : Obj->sections()) {
+//    Expected<StringRef> NameOrErr = Sec.getName();
+//    if (!NameOrErr) {
+//      consumeError(NameOrErr.takeError());
+//      continue;
+//    }
+//
+//    if (*NameOrErr != "") {
+//      DataRefImpl ShdrRef = Sec.getRawDataRefImpl();
+//      Elf_Shdr *shdr = const_cast<Elf_Shdr *>(
+//          reinterpret_cast<const Elf_Shdr *>(ShdrRef.p));
+//
+//      if (uint64_t SecLoadAddr = L.getSectionLoadAddress(*SI)) {
+//        // This assumes that the address passed in matches the target address
+//        // bitness. The template-based type cast handles everything else.
+//        shdr->sh_addr = static_cast<addr_type>(SecLoadAddr);
+//      }
+//    }
+//    ++SI;
+//  }
+//
+//  return std::move(Obj);
+}
+
 } // end namespace jitlink
 } // end namespace llvm

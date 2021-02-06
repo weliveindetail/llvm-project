@@ -37,7 +37,7 @@ void JITLinkerBase::linkPhase1(std::unique_ptr<JITLinkerBase> Self) {
     dumpGraph(dbgs());
   });
 
-  prune(*G);
+  //prune(*G);
 
   LLVM_DEBUG({
     dbgs() << "Link graph \"" << G->getName() << "\" post-pruning:\n";
@@ -69,7 +69,7 @@ void JITLinkerBase::linkPhase1(std::unique_ptr<JITLinkerBase> Self) {
   LLVM_DEBUG(
       { dbgs() << "Resolving symbols defined in " << G->getName() << "\n"; });
 
-  if (auto Err = Ctx->notifyResolved(*G))
+  if (auto Err = Ctx->notifyResolved(*G, Layout))
     return Ctx->notifyFailed(std::move(Err));
 
   auto ExternalSymbols = getExternalSymbolNames();
@@ -174,8 +174,7 @@ Error JITLinkerBase::runPasses(LinkGraphPassList &Passes) {
   return Error::success();
 }
 
-JITLinkerBase::SegmentLayoutMap JITLinkerBase::layOutBlocks() {
-
+SegmentLayoutMap JITLinkerBase::layOutBlocks() {
   SegmentLayoutMap Layout;
 
   /// Partition blocks based on permissions and content vs. zero-fill.

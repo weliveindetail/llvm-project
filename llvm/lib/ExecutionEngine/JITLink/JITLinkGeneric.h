@@ -42,15 +42,6 @@ public:
   virtual ~JITLinkerBase();
 
 protected:
-  struct SegmentLayout {
-    using BlocksList = std::vector<Block *>;
-
-    BlocksList ContentBlocks;
-    BlocksList ZeroFillBlocks;
-  };
-
-  using SegmentLayoutMap = DenseMap<unsigned, SegmentLayout>;
-
   // Phase 1:
   //   1.1: Run pre-prune passes
   //   1.2: Prune graph

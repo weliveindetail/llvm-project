@@ -18,7 +18,8 @@ JITLinkMemoryManager::Allocation::~Allocation() = default;
 
 Expected<std::unique_ptr<JITLinkMemoryManager::Allocation>>
 InProcessMemoryManager::allocate(const JITLinkDylib *JD,
-                                 const SegmentsRequestMap &Request) {
+                                 const SegmentsRequestMap &Request,
+                                 sys::MemoryBlock *NearBlock) {
 
   using AllocationMap = DenseMap<unsigned, sys::MemoryBlock>;
 
@@ -101,7 +102,7 @@ InProcessMemoryManager::allocate(const JITLinkDylib *JD,
   // Allocate one slab to cover all the segments.
   std::error_code EC;
   auto SlabRemaining =
-      sys::Memory::allocateMappedMemory(TotalSize, nullptr, ReadWrite, EC);
+      sys::Memory::allocateMappedMemory(TotalSize, NearBlock, ReadWrite, EC);
 
   if (EC)
     return errorCodeToError(EC);
@@ -116,7 +117,7 @@ InProcessMemoryManager::allocate(const JITLinkDylib *JD,
 
     sys::MemoryBlock SegMem(SlabRemaining.base(), SegmentSize);
     SlabRemaining = sys::MemoryBlock((char *)SlabRemaining.base() + SegmentSize,
-                                     SegmentSize);
+                                     SlabRemaining.allocatedSize() - SegmentSize);
 
     // Zero out the zero-fill memory.
     memset(static_cast<char *>(SegMem.base()) + Seg.getContentSize(), 0,
@@ -125,6 +126,8 @@ InProcessMemoryManager::allocate(const JITLinkDylib *JD,
     // Record the block for this segment.
     Blocks[KV.first] = std::move(SegMem);
   }
+
+  assert(SlabRemaining.allocatedSize() >= 0 && "Overflow");
   return std::unique_ptr<InProcessMemoryManager::Allocation>(
       new IPMMAlloc(std::move(Blocks)));
 }

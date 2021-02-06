@@ -20,6 +20,7 @@
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/Triple.h"
 #include "llvm/ExecutionEngine/JITSymbol.h"
+#include "llvm/Object/ObjectFile.h"
 #include "llvm/Support/Allocator.h"
 #include "llvm/Support/Endian.h"
 #include "llvm/Support/Error.h"
@@ -261,6 +262,15 @@ private:
   size_t Size = 0;
   std::vector<Edge> Edges;
 };
+
+struct SegmentLayout {
+  using BlocksList = std::vector<Block *>;
+
+  BlocksList ContentBlocks;
+  BlocksList ZeroFillBlocks;
+};
+
+using SegmentLayoutMap = DenseMap<unsigned, SegmentLayout>;
 
 /// Describes symbol linkage. This can be used to make resolve definition
 /// clashes.
@@ -659,6 +669,11 @@ private:
   Block *Last = nullptr;
 };
 
+// First argument refers to a WriteableMemoryBuffer
+using NameAddrMap = std::map<StringRef, JITTargetAddress>;
+using PrepareObjectForDebugFunction =
+    std::function<Error(MutableArrayRef<char>, const NameAddrMap &)>;
+
 class LinkGraph {
 private:
   using SectionList = std::vector<std::unique_ptr<Section>>;
@@ -787,9 +802,10 @@ public:
                                  getSectionConstBlocks>;
 
   LinkGraph(std::string Name, const Triple &TT, unsigned PointerSize,
-            support::endianness Endianness)
+            support::endianness Endianness,
+            PrepareObjectForDebugFunction PrepareDebugObjFunc = nullptr)
       : Name(std::move(Name)), TT(TT), PointerSize(PointerSize),
-        Endianness(Endianness) {}
+        Endianness(Endianness), PrepareDebugObjFunc(std::move(PrepareDebugObjFunc)) {}
 
   /// Returns the name of this graph (usually the name of the original
   /// underlying MemoryBuffer).
@@ -803,6 +819,19 @@ public:
 
   /// Returns the endianness of content in this graph.
   support::endianness getEndianness() const { return Endianness; }
+
+  bool canPrepareObjectForDebug() const {
+    return static_cast<bool>(PrepareDebugObjFunc);
+  }
+
+  // TODO: It would be nice to move this to JITLinkContext, but it's
+  // instantiated in ObjectLinkingLayer::emit() and cannot reach the linker
+  // backends that provide the PrepareDebugObjFunc function.
+  Error prepareObjectForDebug(MutableArrayRef<char> ObjBuffer,
+                              const NameAddrMap &SectionsInTargetMemory) const {
+    assert(PrepareDebugObjFunc && "If we cannot transform we should be here");
+    return PrepareDebugObjFunc(ObjBuffer, SectionsInTargetMemory);
+  };
 
   /// Allocate a copy of the given string using the LinkGraph's allocator.
   /// This can be useful when renaming symbols or adding new content to the
@@ -1056,6 +1085,8 @@ private:
   SectionList Sections;
   ExternalSymbolSet ExternalSymbols;
   ExternalSymbolSet AbsoluteSymbols;
+
+  PrepareObjectForDebugFunction PrepareDebugObjFunc;
 };
 
 /// Enables easy lookup of blocks by addresses.
@@ -1333,7 +1364,7 @@ public:
   /// If the client detects an error in the LinkGraph state (e.g. unexpected or
   /// missing symbols) they may return an error here. The error will be
   /// propagated to notifyFailed and the linker will bail out.
-  virtual Error notifyResolved(LinkGraph &G) = 0;
+  virtual Error notifyResolved(LinkGraph &G, const SegmentLayoutMap &Layout) = 0;
 
   /// Called by JITLink to notify the context that the object has been
   /// finalized (i.e. emitted to memory and memory permissions set). If all of
@@ -1359,6 +1390,8 @@ public:
   /// Called by JITLink to modify the pass pipeline prior to linking.
   /// The default version performs no modification.
   virtual Error modifyPassConfig(const Triple &TT, PassConfiguration &Config);
+
+  //virtual sys::MemoryBlock getObjBufferBlock() { return sys::MemoryBlock(); }
 
 private:
   const JITLinkDylib *JD = nullptr;

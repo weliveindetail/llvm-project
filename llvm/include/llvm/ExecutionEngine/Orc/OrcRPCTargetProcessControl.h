@@ -149,7 +149,8 @@ public:
 
   Expected<std::unique_ptr<Allocation>>
   allocate(const jitlink::JITLinkDylib *JD,
-           const SegmentsRequestMap &Request) override {
+           const SegmentsRequestMap &Request,
+           sys::MemoryBlock *NearBlock = nullptr) override {
     orcrpctpc::ReserveMemRequest RMR;
     HostAllocMap HostAllocs;
 

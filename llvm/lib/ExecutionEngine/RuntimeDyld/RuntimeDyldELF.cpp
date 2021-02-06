@@ -20,6 +20,7 @@
 #include "llvm/Object/ELFObjectFile.h"
 #include "llvm/Object/ObjectFile.h"
 #include "llvm/Support/Endian.h"
+#include "llvm/Support/FormatVariadic.h"
 #include "llvm/Support/MemoryBuffer.h"
 
 using namespace llvm;
@@ -149,6 +150,7 @@ createRTDyldELFObject(MemoryBufferRef Buffer, const ObjectFile &SourceObject,
     return std::move(E);
 
   std::unique_ptr<DyldELFObject<ELFT>> Obj = std::move(*ObjOrErr);
+  dbgs() << "RTDyld section load-addresses:\n";
 
   // Iterate over all sections in the object.
   auto SI = SourceObject.section_begin();
@@ -167,7 +169,10 @@ createRTDyldELFObject(MemoryBufferRef Buffer, const ObjectFile &SourceObject,
       if (uint64_t SecLoadAddr = L.getSectionLoadAddress(*SI)) {
         // This assumes that the address passed in matches the target address
         // bitness. The template-based type cast handles everything else.
+        dbgs() << formatv("  {0:x16} {1}\n", SecLoadAddr, *NameOrErr);
         shdr->sh_addr = static_cast<addr_type>(SecLoadAddr);
+      } else {
+        dbgs() << formatv("                     {0}\n", *NameOrErr);
       }
     }
     ++SI;
