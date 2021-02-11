@@ -653,9 +653,9 @@ private:
 public:
   ELFLinkGraphBuilder_x86_64(StringRef FileName,
                              const object::ELFFile<object::ELF64LE> &Obj)
-      : G(std::make_unique<LinkGraph>(FileName.str(),
-                                      Triple("x86_64-unknown-linux"),
-                                      getPointerSize(Obj), getEndianness(Obj))),
+      : G(std::make_unique<LinkGraph>(
+            FileName.str(), Triple("x86_64-unknown-linux"), getPointerSize(Obj),
+            getEndianness(Obj), &patchSectionLoadAddressesInELFObject_x86_64)),
         Obj(Obj) {}
 
   Expected<std::unique_ptr<LinkGraph>> buildGraph() {
@@ -758,6 +758,55 @@ createLinkGraphFromELFObject_x86_64(MemoryBufferRef ObjectBuffer) {
   return ELFLinkGraphBuilder_x86_64((*ELFObj)->getFileName(),
                                     ELFObjFile.getELFFile())
       .buildGraph();
+}
+
+LLVM_ELF_IMPORT_TYPES_ELFT(object::ELF64LE)
+
+Error patchSectionLoadAddressesInELFObject_x86_64(
+    MutableArrayRef<char> ObjBufferMem,
+    const jitlink::NameAddrMap &SectionsInTargetMemory) {
+
+  MemoryBufferRef ObjectBuffer(
+      StringRef(ObjBufferMem.data(), ObjBufferMem.size()), "");
+  auto ELFObj = object::ObjectFile::createELFObjectFile(ObjectBuffer);
+  if (!ELFObj)
+    return ELFObj.takeError();
+
+  auto &ELFObjFile = cast<object::ELFObjectFile<object::ELF64LE>>(**ELFObj);
+  const object::ELFFile<object::ELF64LE> &Obj = ELFObjFile.getELFFile();
+
+  auto Sections = Obj.sections();
+  if (!Sections)
+    return Sections.takeError();
+
+  for (auto &SecRef : *Sections) {
+    assert(SecRef.sh_addr == 0 && "Section load-address set already");
+    StringRef Name = cantFail(Obj.getSectionName(SecRef));
+    auto It = SectionsInTargetMemory.find(Name);
+    if (It != SectionsInTargetMemory.end()) {
+      // Overwrite the load-address location in ObjBufferMem.
+      Elf_Shdr *shdr =
+          const_cast<Elf_Shdr *>(reinterpret_cast<const Elf_Shdr *>(&SecRef));
+      shdr->sh_addr = static_cast<object::ELF64LE::uint>(It->second);
+    }
+  }
+
+  LLVM_DEBUG({
+    dbgs() << formatv("Section load-addresses in debug object {0:x}\n",
+                      pointerToJITTargetAddress(ObjBufferMem.data()));
+    for (auto &SecRef : *Sections) {
+      StringRef Name = cantFail(Obj.getSectionName(SecRef));
+      if (!Name.empty()) {
+        if (auto Addr = static_cast<object::ELF64LE::uint>(SecRef.sh_addr)) {
+          dbgs() << formatv("  {0:x16} {1}\n", Addr, Name);
+        } else {
+          dbgs() << formatv("                     {0}\n", Name);
+        }
+      }
+    }
+  });
+
+  return Error::success();
 }
 
 void link_ELF_x86_64(std::unique_ptr<LinkGraph> G,

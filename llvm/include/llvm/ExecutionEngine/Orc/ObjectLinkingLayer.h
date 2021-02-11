@@ -56,6 +56,9 @@ class ObjectLinkingLayer : public ObjectLayer, private ResourceManager {
   friend class ObjectLinkingLayerJITLinkContext;
 
 public:
+  using GetDebugObjCallback =
+      std::function<Expected<std::unique_ptr<MemoryBuffer>>()>;
+
   /// Plugin instances can be added to the ObjectLinkingLayer to receive
   /// callbacks when code is loaded or emitted, and when JITLink is being
   /// configured.
@@ -69,7 +72,8 @@ public:
                                   const Triple &TT,
                                   jitlink::PassConfiguration &Config) {}
 
-    virtual void notifyLoaded(MaterializationResponsibility &MR) {}
+    virtual void notifyLoaded(MaterializationResponsibility &MR,
+                              GetDebugObjCallback GetDebugObj) {}
     virtual Error notifyEmitted(MaterializationResponsibility &MR) {
       return Error::success();
     }
@@ -163,7 +167,8 @@ private:
 
   void modifyPassConfig(MaterializationResponsibility &MR, const Triple &TT,
                         jitlink::PassConfiguration &PassConfig);
-  void notifyLoaded(MaterializationResponsibility &MR);
+  void notifyLoaded(MaterializationResponsibility &MR,
+                    GetDebugObjCallback GetDebugObj);
   Error notifyEmitted(MaterializationResponsibility &MR, AllocPtr Alloc);
 
   Error handleRemoveResources(ResourceKey K) override;

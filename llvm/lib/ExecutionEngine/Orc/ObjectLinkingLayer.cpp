@@ -10,6 +10,8 @@
 
 #include "llvm/ADT/Optional.h"
 #include "llvm/ExecutionEngine/JITLink/EHFrameSupport.h"
+#include "llvm/ExecutionEngine/JITLink/JITLink.h"
+#include "llvm/Support/Process.h"
 
 #include <vector>
 
@@ -96,7 +98,7 @@ public:
               });
   }
 
-  Error notifyResolved(LinkGraph &G) override {
+  Error notifyResolved(LinkGraph &G, const SegmentLayoutMap &Layout) override {
     auto &ES = Layer.getExecutionSession();
 
     SymbolFlagsMap ExtraSymbolsToClaim;
@@ -190,7 +192,14 @@ public:
     if (auto Err = MR->notifyResolved(InternedResult))
       return Err;
 
-    Layer.notifyLoaded(*MR);
+    ObjectLinkingLayer::GetDebugObjCallback GetDebugObjFunc = nullptr;
+    if (ObjBuffer && G.canPrepareObjectForDebug())
+      GetDebugObjFunc = [&]() {
+        return transformDebugObj(*ObjBuffer, G, Layout);
+      };
+
+    Layer.notifyLoaded(*MR, GetDebugObjFunc);
+
     return Error::success();
   }
 
@@ -450,9 +459,61 @@ private:
     }
   }
 
+  Expected<MutableArrayRef<char>> allocateDebugObj(StringRef ObjMem) {
+    // TODO: We probably want to allow multiple allocs per JITLinkContext.
+    if (DebugObjAlloc)
+      return make_error<StringError>(
+          formatv("Failed to initialize debug object: JITLinkContext for has "
+                  "an associated debug object already"),
+          inconvertibleErrorCode());
+
+    // TODO: This works, but what alignment requirements do we actually have?
+    unsigned Alignment = sys::Process::getPageSizeEstimate();
+    unsigned ReadWrite = sys::Memory::MF_READ | sys::Memory::MF_WRITE;
+
+    Expected<std::unique_ptr<JITLinkMemoryManager::Allocation>> AllocOrErr =
+        Layer.MemMgr.allocate(&MR->getTargetJITDylib(),
+                              {{ReadWrite, {Alignment, ObjMem.size(), 0}}});
+    if (!AllocOrErr)
+      return AllocOrErr.takeError();
+    DebugObjAlloc = std::move(*AllocOrErr);
+
+    MutableArrayRef<char> DebugObjMem = DebugObjAlloc->getWorkingMemory(
+        static_cast<sys::Memory::ProtectionFlags>(ReadWrite));
+    memcpy(DebugObjMem.data(), ObjMem.data(), ObjMem.size());
+
+    return DebugObjMem;
+  }
+
+  Expected<std::unique_ptr<MemoryBuffer>>
+  transformDebugObj(const MemoryBuffer &ObjBuffer, const LinkGraph &G,
+                    const SegmentLayoutMap &Layout) {
+
+    Expected<MutableArrayRef<char>> DebugObjMem =
+        allocateDebugObj(ObjBuffer.getBuffer());
+    if (!DebugObjMem)
+      return DebugObjMem.takeError();
+
+    std::map<StringRef, JITTargetAddress> SectionLoadAddresses;
+    for (auto &KV : Layout) {
+      for (Block *B : KV.second.ContentBlocks)
+        SectionLoadAddresses[B->getSection().getName()] = B->getAddress();
+      for (Block *B : KV.second.ZeroFillBlocks)
+        SectionLoadAddresses[B->getSection().getName()] = B->getAddress();
+    }
+
+    if (Error Err = G.prepareObjectForDebug(*DebugObjMem, SectionLoadAddresses))
+      return std::move(Err);
+
+    StringRef Name = ObjBuffer.getBufferIdentifier();
+    StringRef MemRange(DebugObjMem->data(), DebugObjMem->size());
+    return MemoryBuffer::getMemBuffer(MemRange, Name, false);
+  }
+
   ObjectLinkingLayer &Layer;
   std::unique_ptr<MaterializationResponsibility> MR;
   std::unique_ptr<MemoryBuffer> ObjBuffer;
+  std::unique_ptr<JITLinkMemoryManager::Allocation> DebugObjAlloc;
   DenseMap<SymbolStringPtr, SymbolNameSet> ExternalNamedSymbolDeps;
   DenseMap<SymbolStringPtr, SymbolNameSet> InternalNamedSymbolDeps;
 };
@@ -501,9 +562,10 @@ void ObjectLinkingLayer::modifyPassConfig(MaterializationResponsibility &MR,
     P->modifyPassConfig(MR, TT, PassConfig);
 }
 
-void ObjectLinkingLayer::notifyLoaded(MaterializationResponsibility &MR) {
+void ObjectLinkingLayer::notifyLoaded(MaterializationResponsibility &MR,
+                                      GetDebugObjCallback GetDebugObj) {
   for (auto &P : Plugins)
-    P->notifyLoaded(MR);
+    P->notifyLoaded(MR, GetDebugObj);
 }
 
 Error ObjectLinkingLayer::notifyEmitted(MaterializationResponsibility &MR,

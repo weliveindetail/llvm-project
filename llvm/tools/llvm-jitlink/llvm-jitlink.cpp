@@ -14,6 +14,8 @@
 
 #include "llvm-jitlink.h"
 
+#include "llvm-jitlink-gdb-loader.h"
+
 #include "llvm/BinaryFormat/Magic.h"
 #include "llvm/ExecutionEngine/Orc/ExecutionUtils.h"
 #include "llvm/ExecutionEngine/Orc/TPCDynamicLibrarySearchGenerator.h"
@@ -843,6 +845,7 @@ Session::Session(std::unique_ptr<TargetProcessControl> TPC, Error &Err)
         ES, ExitOnErr(TPCEHFrameRegistrar::Create(*this->TPC))));
 
   ObjLayer.addPlugin(std::make_unique<JITLinkSessionPlugin>(*this));
+  ObjLayer.addPlugin(std::make_unique<JITLinkGDBLoaderPlugin>());
 
   // Process any harness files.
   for (auto &HarnessFile : TestHarnesses) {

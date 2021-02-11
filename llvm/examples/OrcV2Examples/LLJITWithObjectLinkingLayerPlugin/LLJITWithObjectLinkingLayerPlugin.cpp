@@ -63,7 +63,9 @@ public:
     });
   }
 
-  void notifyLoaded(MaterializationResponsibility &MR) override {
+  void
+  notifyLoaded(MaterializationResponsibility &MR,
+               ObjectLinkingLayer::GetDebugObjCallback GetDebugObj) override {
     dbgs() << "Loading object defining " << MR.getSymbols() << "\n";
   }
 

@@ -52,6 +52,11 @@ enum ELFX86RelocationKind : Edge::Kind {
 Expected<std::unique_ptr<LinkGraph>>
 createLinkGraphFromELFObject_x86_64(MemoryBufferRef ObjectBuffer);
 
+/// ObjectBuffer refers to a WriteableMemoryBuffer
+Error patchSectionLoadAddressesInELFObject_x86_64(
+    MutableArrayRef<char> ObjBufferMem,
+    const jitlink::NameAddrMap &SectionsInTargetMemory);
+
 /// jit-link the given object buffer, which must be a ELF x86-64 object file.
 void link_ELF_x86_64(std::unique_ptr<LinkGraph> G,
                      std::unique_ptr<JITLinkContext> Ctx);
