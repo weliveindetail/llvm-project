@@ -1,0 +1,14 @@
+# REQUIRES: target-x86_64
+# XFAIL: system-windows
+
+# RUN: %clang -c -g -fPIC --target=x86_64-unknown-unknown-elf -o %t.o %p/Inputs/jitbp.cpp
+# RUN: %lldb -b -o 'settings set plugin.jit-loader.gdb.enable on' -o 'b jitbp' -o 'run %t.o' llvm-jitlink | FileCheck %s
+
+# CHECK: Breakpoint 1: no locations (pending).
+# CHECK: (lldb) run {{.*}}
+# CHECK: Process {{.*}} stopped
+# CHECK: JIT(0x{{.*}})`jitbp() at jitbp.cpp:1:15
+# CHECK: -> 1    int jitbp() { return 0; }
+# CHECK:                       ^
+# CHECK:    2    int main() { return jitbp(); }
+# CHECK: Process {{.*}} launched: {{.*}}

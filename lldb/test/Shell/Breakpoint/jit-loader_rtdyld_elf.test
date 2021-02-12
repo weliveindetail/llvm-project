@@ -5,7 +5,7 @@
 # RUN: %lldb -b -o 'settings set plugin.jit-loader.gdb.enable on' -o 'b jitbp' -o 'run -jit-kind=mcjit %t.ll' lli | FileCheck %s
 
 # CHECK: Breakpoint 1: no locations (pending).
-# CHECK: (lldb) run -jit-kind=mcjit {{.*}}/jitbp_elf.test.tmp.ll
+# CHECK: (lldb) run -jit-kind=mcjit {{.*}}
 # CHECK: Process {{.*}} stopped
 # CHECK: JIT(0x{{.*}})`jitbp() at jitbp.cpp:1:15
 # CHECK: -> 1    int jitbp() { return 0; }
