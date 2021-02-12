@@ -307,13 +307,12 @@ private:
           return NameOrErr.takeError();
 
         LLVM_DEBUG({
-          dbgs() << "  value = " << formatv("{0:x16}", SymRef.getValue())
-                 << ", type = " << formatv("{0:x2}", SymRef.getType())
-                 << ", binding = " << formatv("{0:x2}", SymRef.getBinding())
-                 << ", size = "
-                 << formatv("{0:x16}", static_cast<uint64_t>(SymRef.st_size))
-                 << ", info = " << formatv("{0:x2}", SymRef.st_info)
-                 << " :" << (Name ? *Name : "<anonymous symbol>") << "\n";
+          uint64_t Size = static_cast<uint64_t>(SymRef.st_size);
+          StringRef Symbol = Name->empty() ? "<anonymous symbol>" : *Name;
+          dbgs() << formatv("  value = {0:x16}, type = {1:x2}, binding = "
+                            "{2:x2}, size = {3:x16}, info = {4:x2}: {5}\n",
+                            SymRef.getValue(), SymRef.getType(),
+                            SymRef.getBinding(), Size, SymRef.st_info, Symbol);
         });
       }
     }
@@ -358,9 +357,9 @@ private:
       (void)Flags;
 
       LLVM_DEBUG({
-        dbgs() << "  " << *Name << ": " << formatv("{0:x16}", Address) << " -- "
-               << formatv("{0:x16}", Address + Size) << ", align: " << Alignment
-               << " Flags: " << formatv("{0:x}", Flags) << "\n";
+        dbgs() << formatv(
+            "  {0}: {1:x16} -- {2:x16}, align: {3}, flags: {4:x}\n", *Name,
+            Address, Address + Size, Alignment, Flags);
       });
 
       if (SecRef.sh_type != ELF::SHT_NOBITS) {
@@ -468,8 +467,7 @@ private:
             (*UpdateSection)->sh_addr + Rela.r_offset;
 
         LLVM_DEBUG({
-          dbgs() << "Processing relocation at "
-                 << format("0x%016" PRIx64, FixupAddress) << "\n";
+          dbgs() << format("Processing relocation at {0:x16}\n", FixupAddress);
         });
         auto Kind = getRelocationKind(Type);
         if (!Kind)
