@@ -10,6 +10,8 @@
 
 #include "llvm/ADT/Optional.h"
 #include "llvm/ExecutionEngine/JITLink/EHFrameSupport.h"
+#include "llvm/ExecutionEngine/JITLink/JITLink.h"
+#include "llvm/Support/Process.h"
 
 #include <vector>
 
@@ -39,6 +41,11 @@ public:
   }
 
   JITLinkMemoryManager &getMemoryManager() override { return Layer.MemMgr; }
+
+  void notifyMaterializing(const jitlink::LinkGraph &G) override {
+    for (auto &P : Layer.Plugins)
+      P->notifyMaterializing(*MR, G, *this);
+  }
 
   void notifyFailed(Error Err) override {
     for (auto &P : Layer.Plugins)
@@ -450,6 +457,25 @@ private:
     }
   }
 
+  Expected<std::unique_ptr<JITLinkMemoryManager::Allocation>>
+  allocateDebugObj(sys::Memory::ProtectionFlags Segment) const override {
+    // TODO: This works, but what actual alignment requirements do we have?
+    unsigned Alignment = sys::Process::getPageSizeEstimate();
+
+    StringRef ObjMem = ObjBuffer->getBuffer();
+    Expected<std::unique_ptr<JITLinkMemoryManager::Allocation>> AllocOrErr =
+        Layer.MemMgr.allocate(&MR->getTargetJITDylib(),
+                              {{Segment, {Alignment, ObjMem.size(), 0}}});
+    if (!AllocOrErr)
+      return AllocOrErr.takeError();
+
+    JITLinkMemoryManager::Allocation &DebugObjAlloc = **AllocOrErr;
+    MutableArrayRef<char> DebugObjMem = DebugObjAlloc.getWorkingMemory(Segment);
+    memcpy(DebugObjMem.data(), ObjMem.data(), ObjMem.size());
+
+    return std::move(*AllocOrErr);
+  }
+
   ObjectLinkingLayer &Layer;
   std::unique_ptr<MaterializationResponsibility> MR;
   std::unique_ptr<MemoryBuffer> ObjBuffer;
@@ -479,19 +505,26 @@ ObjectLinkingLayer::~ObjectLinkingLayer() {
 void ObjectLinkingLayer::emit(std::unique_ptr<MaterializationResponsibility> R,
                               std::unique_ptr<MemoryBuffer> O) {
   assert(O && "Object must not be null");
-  auto ObjBuffer = O->getMemBufferRef();
-  auto Ctx = std::make_unique<ObjectLinkingLayerJITLinkContext>(
-      *this, std::move(R), std::move(O));
-  if (auto G = createLinkGraphFromObject(ObjBuffer))
+  MemoryBufferRef ObjBuffer = O->getMemBufferRef();
+
+  std::unique_ptr<JITLinkContext> Ctx =
+      std::make_unique<ObjectLinkingLayerJITLinkContext>(*this, std::move(R),
+                                                         std::move(O));
+  if (auto G = createLinkGraphFromObject(ObjBuffer)) {
+    Ctx->notifyMaterializing(**G);
     link(std::move(*G), std::move(Ctx));
-  else
+  } else {
     Ctx->notifyFailed(G.takeError());
+  }
 }
 
 void ObjectLinkingLayer::emit(std::unique_ptr<MaterializationResponsibility> R,
                               std::unique_ptr<LinkGraph> G) {
-  link(std::move(G), std::make_unique<ObjectLinkingLayerJITLinkContext>(
-                         *this, std::move(R), nullptr));
+  std::unique_ptr<JITLinkContext> Ctx =
+      std::make_unique<ObjectLinkingLayerJITLinkContext>(*this, std::move(R),
+                                                         nullptr);
+  Ctx->notifyMaterializing(*G);
+  link(std::move(G), std::move(Ctx));
 }
 
 void ObjectLinkingLayer::modifyPassConfig(MaterializationResponsibility &MR,

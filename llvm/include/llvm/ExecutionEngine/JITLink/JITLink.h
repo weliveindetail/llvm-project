@@ -1315,6 +1315,9 @@ public:
   /// Return the MemoryManager to be used for this link.
   virtual JITLinkMemoryManager &getMemoryManager() = 0;
 
+  /// Notify this context that linking is about to start.
+  virtual void notifyMaterializing(const jitlink::LinkGraph &G) = 0;
+
   /// Notify this context that linking failed.
   /// Called by JITLink if linking cannot be completed.
   virtual void notifyFailed(Error Err) = 0;
@@ -1359,6 +1362,11 @@ public:
   /// Called by JITLink to modify the pass pipeline prior to linking.
   /// The default version performs no modification.
   virtual Error modifyPassConfig(const Triple &TT, PassConfiguration &Config);
+
+  virtual Expected<std::unique_ptr<JITLinkMemoryManager::Allocation>>
+  allocateDebugObj(sys::Memory::ProtectionFlags Segment) const {
+    return nullptr;
+  }
 
 private:
   const JITLinkDylib *JD = nullptr;

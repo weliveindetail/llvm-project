@@ -22,6 +22,7 @@ add_llvm_tool(llvm-jitlink
   llvm-jitlink.cpp
   llvm-jitlink-elf.cpp
   llvm-jitlink-macho.cpp
+  llvm-jitlink-gdb-loader.cpp
   )
 
 export_executable_symbols(llvm-jitlink)

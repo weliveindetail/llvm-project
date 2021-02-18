@@ -69,6 +69,10 @@ public:
                                   const Triple &TT,
                                   jitlink::PassConfiguration &Config) {}
 
+    virtual void notifyMaterializing(MaterializationResponsibility &MR,
+                                     const jitlink::LinkGraph &G,
+                                     const jitlink::JITLinkContext &Ctx) {}
+
     virtual void notifyLoaded(MaterializationResponsibility &MR) {}
     virtual Error notifyEmitted(MaterializationResponsibility &MR) {
       return Error::success();

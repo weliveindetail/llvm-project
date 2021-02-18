@@ -326,15 +326,6 @@ private:
       if (!Name)
         return Name.takeError();
 
-      // Skip Dwarf sections.
-      if (isDwarfSection(*Name)) {
-        LLVM_DEBUG({
-          dbgs() << *Name
-                 << " is a debug section: No graph section will be created.\n";
-        });
-        continue;
-      }
-
       sys::Memory::ProtectionFlags Prot;
       if (SecRef.sh_flags & ELF::SHF_EXECINSTR) {
         Prot = static_cast<sys::Memory::ProtectionFlags>(sys::Memory::MF_READ |
