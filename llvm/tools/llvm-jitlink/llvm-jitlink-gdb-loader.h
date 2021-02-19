@@ -31,6 +31,8 @@ class JITLoaderGDBPlugin : public ObjectLinkingLayer::Plugin {
       static_cast<sys::Memory::ProtectionFlags>(sys::Memory::MF_READ);
 
 public:
+  JITLoaderGDBPlugin(ExecutionSession &ES) : ES(ES) {}
+
   void notifyMaterializing(MaterializationResponsibility &MR,
                            const jitlink::LinkGraph &G,
                            const jitlink::JITLinkContext &Ctx) override;
@@ -46,9 +48,10 @@ public:
                         jitlink::PassConfiguration &PassConfig) override;
 
 private:
+  ExecutionSession &ES;
+  std::mutex DebugAllocLock;
   DenseMap<ResourceKey, std::vector<DebugAllocation>> DebugAllocs;
   DenseMap<ResourceKey, DebugAllocation> PendingDebugAllocs;
-  std::mutex DebugAllocLock;
 
   static ResourceKey getResourceKey(MaterializationResponsibility &MR);
 };

@@ -845,7 +845,7 @@ Session::Session(std::unique_ptr<TargetProcessControl> TPC, Error &Err)
         ES, ExitOnErr(TPCEHFrameRegistrar::Create(*this->TPC))));
 
   ObjLayer.addPlugin(std::make_unique<JITLinkSessionPlugin>(*this));
-  ObjLayer.addPlugin(std::make_unique<JITLoaderGDBPlugin>());
+  ObjLayer.addPlugin(std::make_unique<JITLoaderGDBPlugin>(ES));
 
   // Process any harness files.
   for (auto &HarnessFile : TestHarnesses) {

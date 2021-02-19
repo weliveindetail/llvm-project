@@ -216,7 +216,7 @@ void JITLoaderGDBPlugin::notifyMaterializing(
   ResourceKey Key = getResourceKey(MR);
   auto It = PendingDebugAllocs.find(Key);
   if (It != PendingDebugAllocs.end()) {
-    MR.getExecutionSession().reportError(make_error<StringError>(
+    ES.reportError(make_error<StringError>(
         formatv("Materializing new LinkGraph '{0}' for pending resource: {1}",
                 G.getName(), Key),
         inconvertibleErrorCode()));
@@ -225,7 +225,7 @@ void JITLoaderGDBPlugin::notifyMaterializing(
 
   Expected<DebugAllocation> Alloc = Ctx.allocateDebugObj(ReadOnlySegment);
   if (!Alloc) {
-    MR.getExecutionSession().reportError(Alloc.takeError());
+    ES.reportError(Alloc.takeError());
     return;
   }
 
@@ -242,15 +242,14 @@ void JITLoaderGDBPlugin::modifyPassConfig(
 
   // We allocate debug objects for LinkGraphs built from an object file.
   // We cannot synthesize debug objects for raw LinkGraphs yet.
-  ResourceKey Key = getResourceKey(MR);
-  auto It = PendingDebugAllocs.find(Key);
+  auto It = PendingDebugAllocs.find(getResourceKey(MR));
   if (It == PendingDebugAllocs.end())
     return;
 
   Expected<std::unique_ptr<LoadedObjectView>> ObjView =
       createLoadedObject(TT, It->second->getWorkingMemory(ReadOnlySegment));
   if (!ObjView) {
-    MR.getExecutionSession().reportError(ObjView.takeError());
+    ES.reportError(ObjView.takeError());
     return;
   }
 
@@ -337,8 +336,7 @@ void JITLoaderGDBPlugin::notifyTransferringResources(ResourceKey DstKey,
   auto SrcItPending = PendingDebugAllocs.find(SrcKey);
   if (SrcItPending != PendingDebugAllocs.end()) {
     if (PendingDebugAllocs.count(DstKey)) {
-      // TODO: Report it.
-      consumeError(make_error<StringError>(
+      ES.reportError(make_error<StringError>(
           formatv("Destination '{0}' for transferring pending debug object has "
                   "a pending resource already: {1}",
                   DstKey, SrcKey),
