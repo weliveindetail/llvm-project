@@ -10,6 +10,7 @@
 #include "llvm/ExecutionEngine/JITLink/JITLink.h"
 
 #include "llvm/BinaryFormat/Magic.h"
+#include "llvm/ExecutionEngine/JITLink/DebugSupport.h"
 #include "llvm/ExecutionEngine/JITLink/ELF.h"
 #include "llvm/ExecutionEngine/JITLink/MachO.h"
 #include "llvm/Support/Format.h"
@@ -314,6 +315,11 @@ LinkGraphPassFunction JITLinkContext::getMarkLivePass(const Triple &TT) const {
 Error JITLinkContext::modifyPassConfig(const Triple &TT,
                                        PassConfiguration &Config) {
   return Error::success();
+}
+
+Expected<std::unique_ptr<DebugObject>>
+JITLinkContext::createDebugObject(LinkGraph &G) {
+  return nullptr;
 }
 
 Error markAllSymbolsLive(LinkGraph &G) {
