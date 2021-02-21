@@ -153,6 +153,11 @@ static cl::opt<std::string> OutOfProcessExecutorConnect(
     "oop-executor-connect",
     cl::desc("Connect to an out-of-process executor via TCP"));
 
+static cl::opt<bool>
+    WaitForDebugger("wait-for-debugger",
+                    cl::desc("Wait for user input before entering JITed code"),
+                    cl::init(false));
+
 ExitOnError ExitOnErr;
 
 namespace llvm {
@@ -637,6 +642,12 @@ LLVMJITLinkRemoteTargetProcessControl::LaunchExecutor() {
   close(ToExecutor[ReadEnd]);
   close(FromExecutor[WriteEnd]);
 
+  if (WaitForDebugger) {
+    llvm::outs() << "Executor process launched with PID: " << ChildPID << "\n";
+    llvm::outs() << "Attach lldb and press any key to continue.\n";
+    getchar();
+  }
+
   // Return an RPC channel connected to our end of the pipes.
   auto SSP = std::make_shared<SymbolStringPool>();
   auto Channel = std::make_unique<shared::FDRawByteChannel>(
@@ -784,10 +795,17 @@ Expected<std::unique_ptr<Session>> Session::Create(Triple TT) {
       TPC = std::move(*RTPC);
     else
       return RTPC.takeError();
-  } else
+  } else {
     TPC = std::make_unique<SelfTargetProcessControl>(
         std::make_shared<SymbolStringPool>(), std::move(TT), *PageSize,
         createMemoryManager());
+
+    if (WaitForDebugger) {
+      llvm::outs() << "JITing in-process, PID is: " << getpid() << "\n";
+      llvm::outs() << "Attach lldb and press any key to continue.\n";
+      getchar();
+    }
+  }
 
   Error Err = Error::success();
   std::unique_ptr<Session> S(new Session(std::move(TPC), Err));
