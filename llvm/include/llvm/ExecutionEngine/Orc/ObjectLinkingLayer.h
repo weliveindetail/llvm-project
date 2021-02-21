@@ -45,6 +45,7 @@ class ObjectFile;
 
 namespace orc {
 
+class DebugObjectProvider;
 class ObjectLinkingLayerJITLinkContext;
 
 /// An ObjectLayer implementation built on JITLink.
@@ -71,6 +72,11 @@ public:
     virtual void modifyPassConfig(MaterializationResponsibility &MR,
                                   const Triple &TT,
                                   jitlink::PassConfiguration &Config) {}
+
+    virtual void notifyMaterializing(MaterializationResponsibility &MR,
+                                     jitlink::LinkGraph &G,
+                                     jitlink::JITLinkContext &Ctx,
+                                     MemoryBufferRef InputObject) {}
 
     virtual void notifyLoaded(MaterializationResponsibility &MR) {}
     virtual Error notifyEmitted(MaterializationResponsibility &MR) {
