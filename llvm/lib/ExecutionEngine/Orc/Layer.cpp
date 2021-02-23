@@ -155,7 +155,8 @@ void BasicIRLayerMaterializationUnit::materialize(
   }););
 }
 
-ObjectLayer::ObjectLayer(ExecutionSession &ES) : ES(ES) {}
+ObjectLayer::ObjectLayer(ExecutionSession &ES, Kind K)
+    : ES(ES), ObjectLayerKind(K) {}
 
 ObjectLayer::~ObjectLayer() {}
 

@@ -483,13 +483,14 @@ ObjectLinkingLayer::Plugin::~Plugin() {}
 
 ObjectLinkingLayer::ObjectLinkingLayer(ExecutionSession &ES,
                                        JITLinkMemoryManager &MemMgr)
-    : ObjectLayer(ES), MemMgr(MemMgr) {
+    : ObjectLayer(ES, Kind::JITLink), MemMgr(MemMgr) {
   ES.registerResourceManager(*this);
 }
 
 ObjectLinkingLayer::ObjectLinkingLayer(
     ExecutionSession &ES, std::unique_ptr<JITLinkMemoryManager> MemMgr)
-    : ObjectLayer(ES), MemMgr(*MemMgr), MemMgrOwnership(std::move(MemMgr)) {
+    : ObjectLayer(ES, Kind::JITLink), MemMgr(*MemMgr),
+      MemMgrOwnership(std::move(MemMgr)) {
   ES.registerResourceManager(*this);
 }
 

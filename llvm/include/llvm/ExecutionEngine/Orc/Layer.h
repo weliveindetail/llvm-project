@@ -17,6 +17,7 @@
 #include "llvm/ExecutionEngine/Orc/Mangling.h"
 #include "llvm/ExecutionEngine/Orc/ThreadSafeModule.h"
 #include "llvm/IR/Module.h"
+#include "llvm/Support/Casting.h"
 #include "llvm/Support/MemoryBuffer.h"
 
 namespace llvm {
@@ -131,7 +132,15 @@ private:
 /// Interface for Layers that accept object files.
 class ObjectLayer {
 public:
-  ObjectLayer(ExecutionSession &ES);
+  enum class Kind {
+    JITLink = 1,
+    RuntimeDyld = 2,
+    Transform = 3,
+  };
+
+  Kind getKind() const { return ObjectLayerKind; }
+
+  ObjectLayer(ExecutionSession &ES, Kind K);
   virtual ~ObjectLayer();
 
   /// Returns the execution session for this layer.
@@ -151,6 +160,7 @@ public:
 
 private:
   ExecutionSession &ES;
+  const Kind ObjectLayerKind;
 };
 
 /// Materializes the given object file (represented by a MemoryBuffer

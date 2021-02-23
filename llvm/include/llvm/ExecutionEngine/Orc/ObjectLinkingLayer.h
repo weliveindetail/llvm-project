@@ -109,6 +109,10 @@ public:
   /// Destruct an ObjectLinkingLayer.
   ~ObjectLinkingLayer();
 
+  static bool classof(const ObjectLayer *Layer) {
+    return Layer->getKind() == Kind::JITLink;
+  }
+
   /// Set an object buffer return function. By default object buffers are
   /// deleted once the JIT has linked them. If a return function is set then
   /// it will be called to transfer ownership of the buffer instead.

@@ -881,10 +881,12 @@ int runOrcLazyJIT(const char *ProgName) {
 
   auto J = ExitOnErr(Builder.create());
 
-  if (TT->isOSBinFormatELF())
-    static_cast<llvm::orc::RTDyldObjectLinkingLayer &>(J->getObjLinkingLayer())
-        .registerJITEventListener(
-            *JITEventListener::createGDBRegistrationListener());
+  if (TT->isOSBinFormatELF()) {
+    if (auto *ObjLayer =
+            dyn_cast<orc::RTDyldObjectLinkingLayer>(&J->getObjLinkingLayer()))
+      ObjLayer->registerJITEventListener(
+          *JITEventListener::createGDBRegistrationListener());
+  }
 
   if (PerModuleLazy)
     J->setPartitionFunction(orc::CompileOnDemandLayer::compileWholeModule);

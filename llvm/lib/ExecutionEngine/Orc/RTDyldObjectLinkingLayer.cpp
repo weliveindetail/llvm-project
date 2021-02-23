@@ -77,7 +77,7 @@ namespace orc {
 
 RTDyldObjectLinkingLayer::RTDyldObjectLinkingLayer(
     ExecutionSession &ES, GetMemoryManagerFunction GetMemoryManager)
-    : ObjectLayer(ES), GetMemoryManager(GetMemoryManager) {
+    : ObjectLayer(ES, Kind::RuntimeDyld), GetMemoryManager(GetMemoryManager) {
   ES.registerResourceManager(*this);
 }
 

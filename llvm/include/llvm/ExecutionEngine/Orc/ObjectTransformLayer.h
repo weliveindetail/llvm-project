@@ -31,6 +31,10 @@ public:
   ObjectTransformLayer(ExecutionSession &ES, ObjectLayer &BaseLayer,
                        TransformFunction Transform = TransformFunction());
 
+  static bool classof(const ObjectLayer *Layer) {
+    return Layer->getKind() == Kind::Transform;
+  }
+
   void emit(std::unique_ptr<MaterializationResponsibility> R,
             std::unique_ptr<MemoryBuffer> O) override;
 

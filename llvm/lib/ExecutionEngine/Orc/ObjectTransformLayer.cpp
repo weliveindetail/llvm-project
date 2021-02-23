@@ -13,9 +13,10 @@ namespace llvm {
 namespace orc {
 
 ObjectTransformLayer::ObjectTransformLayer(ExecutionSession &ES,
-                                            ObjectLayer &BaseLayer,
-                                            TransformFunction Transform)
-    : ObjectLayer(ES), BaseLayer(BaseLayer), Transform(std::move(Transform)) {}
+                                           ObjectLayer &BaseLayer,
+                                           TransformFunction Transform)
+    : ObjectLayer(ES, Kind::Transform), BaseLayer(BaseLayer),
+      Transform(std::move(Transform)) {}
 
 void ObjectTransformLayer::emit(
     std::unique_ptr<MaterializationResponsibility> R,

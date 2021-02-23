@@ -56,6 +56,10 @@ public:
 
   ~RTDyldObjectLinkingLayer();
 
+  static bool classof(const ObjectLayer *Layer) {
+    return Layer->getKind() == Kind::RuntimeDyld;
+  }
+
   /// Emit the object.
   void emit(std::unique_ptr<MaterializationResponsibility> R,
             std::unique_ptr<MemoryBuffer> O) override;
