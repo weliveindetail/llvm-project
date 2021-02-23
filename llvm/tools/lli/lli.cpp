@@ -24,6 +24,7 @@
 #include "llvm/ExecutionEngine/JITEventListener.h"
 #include "llvm/ExecutionEngine/MCJIT.h"
 #include "llvm/ExecutionEngine/ObjectCache.h"
+#include "llvm/ExecutionEngine/Orc/DebugObjectManagerPlugin.h"
 #include "llvm/ExecutionEngine/Orc/DebugUtils.h"
 #include "llvm/ExecutionEngine/Orc/ExecutionUtils.h"
 #include "llvm/ExecutionEngine/Orc/JITTargetMachineBuilder.h"
@@ -31,6 +32,11 @@
 #include "llvm/ExecutionEngine/Orc/MachOPlatform.h"
 #include "llvm/ExecutionEngine/Orc/OrcRemoteTargetClient.h"
 #include "llvm/ExecutionEngine/Orc/RTDyldObjectLinkingLayer.h"
+#include "llvm/ExecutionEngine/Orc/SymbolStringPool.h"
+#include "llvm/ExecutionEngine/Orc/TPCDebugObjectRegistrar.h"
+#include "llvm/ExecutionEngine/Orc/TPCEHFrameRegistrar.h"
+#include "llvm/ExecutionEngine/Orc/TargetProcess/JITLoaderGDB.h"
+#include "llvm/ExecutionEngine/Orc/TargetProcess/RegisterEHFrames.h"
 #include "llvm/ExecutionEngine/Orc/TargetProcess/TargetExecutionUtils.h"
 #include "llvm/ExecutionEngine/SectionMemoryManager.h"
 #include "llvm/IR/IRBuilder.h"
@@ -77,6 +83,7 @@ static codegen::RegisterCodeGenFlags CGF;
 namespace {
 
   enum class JITKind { MCJIT, OrcLazy };
+  enum class DyldKind { Default, RuntimeDyld, JITLink };
 
   cl::opt<std::string>
   InputFile(cl::desc("<input bitcode>"), cl::Positional, cl::init("-"));
@@ -94,6 +101,15 @@ namespace {
       cl::values(clEnumValN(JITKind::MCJIT, "mcjit", "MCJIT"),
                  clEnumValN(JITKind::OrcLazy, "orc-lazy",
                             "Orc-based lazy JIT.")));
+
+  cl::opt<DyldKind>
+      Dyld("dyld", cl::desc("Choose the dynamic loader."),
+           cl::init(DyldKind::Default),
+           cl::values(
+               clEnumValN(DyldKind::Default, "default",
+                          "Default for platform and JIT-kind"),
+               clEnumValN(DyldKind::RuntimeDyld, "runtime-dyld", "RuntimeDyld"),
+               clEnumValN(DyldKind::JITLink, "jitlink", "Orc-specific Dyld")));
 
   cl::opt<unsigned>
   LazyJITCompileThreads("compile-threads",
@@ -244,6 +260,12 @@ namespace {
       cl::Hidden);
 
   ExitOnError ExitOnErr;
+}
+
+LLVM_ATTRIBUTE_USED void linkComponents() {
+  errs() << (void *)&llvm_orc_registerEHFrameSectionWrapper
+         << (void *)&llvm_orc_deregisterEHFrameSectionWrapper
+         << (void *)&llvm_orc_registerJITLoaderGDBWrapper;
 }
 
 //===----------------------------------------------------------------------===//
@@ -879,6 +901,23 @@ int runOrcLazyJIT(const char *ProgName) {
     }
   }
 
+  std::unique_ptr<orc::TargetProcessControl> TPC = nullptr;
+  if (Dyld == DyldKind::JITLink) {
+    TPC = ExitOnErr(orc::SelfTargetProcessControl::Create(
+        std::make_shared<orc::SymbolStringPool>()));
+
+    Builder.setTargetProcessControl(*TPC);
+    Builder.setObjectLinkingLayerCreator([&TPC](orc::ExecutionSession &ES,
+                                                const Triple &) {
+      auto L = std::make_unique<orc::ObjectLinkingLayer>(ES, TPC->getMemMgr());
+      L->addPlugin(std::make_unique<orc::EHFrameRegistrationPlugin>(
+          ES, ExitOnErr(orc::TPCEHFrameRegistrar::Create(*TPC))));
+      L->addPlugin(std::make_unique<orc::DebugObjectManagerPlugin>(
+          ES, ExitOnErr(orc::createJITLoaderGDBRegistrar(*TPC))));
+      return L;
+    });
+  }
+
   auto J = ExitOnErr(Builder.create());
 
   if (TT->isOSBinFormatELF()) {
@@ -983,10 +1022,15 @@ int runOrcLazyJIT(const char *ProgName) {
   // Run main.
   auto MainSym = ExitOnErr(J->lookup("main"));
 
-  typedef int (*MainFnPtr)(int, char *[]);
-  auto Result = orc::runAsMain(
-      jitTargetAddressToFunction<MainFnPtr>(MainSym.getAddress()), InputArgv,
-      StringRef(InputFile));
+  // Run main.
+  int Result;
+  if (TPC) {
+    Result = ExitOnErr(TPC->runAsMain(MainSym.getAddress(), InputArgv));
+  } else {
+    using MainFnTy = int(int, char *[]);
+    auto MainFn = jitTargetAddressToFunction<MainFnTy *>(MainSym.getAddress());
+    Result = orc::runAsMain(MainFn, InputArgv, StringRef(InputFile));
+  }
 
   // Wait for -entry-point threads.
   for (auto &AltEntryThread : AltEntryThreads)
