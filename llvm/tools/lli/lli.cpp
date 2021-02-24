@@ -83,7 +83,7 @@ static codegen::RegisterCodeGenFlags CGF;
 namespace {
 
   enum class JITKind { MCJIT, OrcLazy };
-  enum class DyldKind { Default, RuntimeDyld, JITLink };
+  enum class JITLinkerKind { Default, RuntimeDyld, JITLink };
 
   cl::opt<std::string>
   InputFile(cl::desc("<input bitcode>"), cl::Positional, cl::init("-"));
@@ -102,14 +102,15 @@ namespace {
                  clEnumValN(JITKind::OrcLazy, "orc-lazy",
                             "Orc-based lazy JIT.")));
 
-  cl::opt<DyldKind>
-      Dyld("dyld", cl::desc("Choose the dynamic loader."),
-           cl::init(DyldKind::Default),
-           cl::values(
-               clEnumValN(DyldKind::Default, "default",
-                          "Default for platform and JIT-kind"),
-               clEnumValN(DyldKind::RuntimeDyld, "runtime-dyld", "RuntimeDyld"),
-               clEnumValN(DyldKind::JITLink, "jitlink", "Orc-specific Dyld")));
+  cl::opt<JITLinkerKind>
+      JITLinker("jit-linker", cl::desc("Choose the dynamic linker/loader."),
+                cl::init(JITLinkerKind::Default),
+                cl::values(clEnumValN(JITLinkerKind::Default, "default",
+                                      "Default for platform and JIT-kind"),
+                           clEnumValN(JITLinkerKind::RuntimeDyld, "rtdyld",
+                                      "RuntimeDyld"),
+                           clEnumValN(JITLinkerKind::JITLink, "jitlink",
+                                      "Orc-specific linker")));
 
   cl::opt<unsigned>
   LazyJITCompileThreads("compile-threads",
@@ -902,7 +903,7 @@ int runOrcLazyJIT(const char *ProgName) {
   }
 
   std::unique_ptr<orc::TargetProcessControl> TPC = nullptr;
-  if (Dyld == DyldKind::JITLink) {
+  if (JITLinker == JITLinkerKind::JITLink) {
     TPC = ExitOnErr(orc::SelfTargetProcessControl::Create(
         std::make_shared<orc::SymbolStringPool>()));
 
