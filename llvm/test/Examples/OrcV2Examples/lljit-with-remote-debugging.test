@@ -1,0 +1,11 @@
+# This test makes sure that the example builds. Instructions for debugging can
+# be found in the example's sources.
+#
+# RUN: LLJITWithRemoteDebugging %p/Inputs/argc_sub1_elf.ll
+#
+# CHECK: Parsed input IR code from: {{.*}}/Inputs/argc_sub1_elf.ll
+# CHECK: Found out-of-process executor: {{.*}}/llvm-jitlink-executor
+# CHECK: Established TargetProcessControl connection to the executor
+# CHECK: Initialized LLJIT for remote executor
+# CHECK: Running: {{.*}}/Inputs/argc_sub1_elf.ll
+# CHECK: Exit code: 0
