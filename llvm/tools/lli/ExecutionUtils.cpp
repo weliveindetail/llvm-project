@@ -143,14 +143,12 @@ LLIBuiltinFunctionGenerator::createToolOutput() {
   return TestOut;
 }
 
-
-
 LLIRemoteTargetProcessControl::LLIRemoteTargetProcessControl(
+    std::shared_ptr<orc::SymbolStringPool> SSP,
     std::unique_ptr<LLIRPCChannel> Channel,
     std::unique_ptr<LLIRPCEndpoint> Endpoint,
     ErrorReporter ReportError)
-    : BaseT(std::make_shared<orc::SymbolStringPool>(), *Endpoint,
-            std::move(ReportError)),
+    : BaseT(std::move(SSP), *Endpoint, std::move(ReportError)),
       Channel(std::move(Channel)), Endpoint(std::move(Endpoint)) {
 
   ListenerThread = std::thread([&]() {
@@ -189,13 +187,15 @@ LLIRemoteTargetProcessControl::Create(orc::ExecutionSession &ES,
   auto Endpoint = std::make_unique<LLIRPCEndpoint>(*Channel, true);
   std::unique_ptr<LLIRemoteTargetProcessControl> TPC(
       new LLIRemoteTargetProcessControl(
-          std::move(Channel), std::move(Endpoint),
+          ES.getSymbolStringPool(), std::move(Channel), std::move(Endpoint),
           [&ES](Error Err) { ES.reportError(std::move(Err)); }));
 
   if (auto Err = TPC->initializeORCRPCTPCBase())
     return joinErrors(std::move(Err), TPC->disconnect());
 
   TPC->initializeMemoryManagement();
+
+  orc::shared::registerStringError<LLIRPCChannel>();
   return std::move(TPC);
 }
 

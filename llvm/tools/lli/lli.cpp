@@ -37,6 +37,7 @@
 #include "llvm/ExecutionEngine/Orc/RTDyldObjectLinkingLayer.h"
 #include "llvm/ExecutionEngine/Orc/SymbolStringPool.h"
 #include "llvm/ExecutionEngine/Orc/TPCDebugObjectRegistrar.h"
+#include "llvm/ExecutionEngine/Orc/TPCDynamicLibrarySearchGenerator.h"
 #include "llvm/ExecutionEngine/Orc/TPCEHFrameRegistrar.h"
 #include "llvm/ExecutionEngine/Orc/TargetProcess/JITLoaderGDB.h"
 #include "llvm/ExecutionEngine/Orc/TargetProcess/RegisterEHFrames.h"
@@ -153,6 +154,10 @@ namespace {
   cl::opt<std::string> OutOfProcessExecutor(
     "oop-executor", cl::desc("Launch an out-of-process executor to run code"),
     cl::value_desc("filename"), cl::ValueOptional);
+
+  cl::opt<bool> WaitForDebugger("wait-for-debugger",
+    cl::desc("Wait for user input before entering JITed code"),
+    cl::init(false));
 
 //  cl::opt<std::string>
 //  ChildExecPath("mcjit-remote-process",
@@ -426,7 +431,7 @@ Expected<std::unique_ptr<llvm::orc::shared::FDRawByteChannel>>
 launchMCJITRemote(std::string ChildExecPath);
 
 Expected<std::unique_ptr<orc::shared::FDRawByteChannel>>
-launchJITLinkExecutor(std::string ChildExecPath);
+launchJITLinkExecutor(const char *ProgName, std::string ChildExecPath);
 
 //===----------------------------------------------------------------------===//
 // main Driver function
@@ -937,7 +942,7 @@ int runOrcLazyJIT(const char *ProgName) {
     } else {
       // Lanch the remote process and initialize TPC for it.
       TPC = ExitOnErr(LLIRemoteTargetProcessControl::Create(
-          *ES, ExitOnErr(launchJITLinkExecutor(OutOfProcessExecutor))));
+          *ES, ExitOnErr(launchJITLinkExecutor(ProgName, OutOfProcessExecutor))));
     }
 
     Builder.setObjectLinkingLayerCreator([&TPC](orc::ExecutionSession &ES,
@@ -981,13 +986,23 @@ int runOrcLazyJIT(const char *ProgName) {
 
   // Unless they've been explicitly disabled, make process symbols available to
   // JIT'd code.
-  if (!NoProcessSymbols)
-    J->getMainJITDylib().addGenerator(
-        ExitOnErr(orc::DynamicLibrarySearchGenerator::GetForCurrentProcess(
-            J->getDataLayout().getGlobalPrefix(),
-            [MainName = Mangle("main")](const orc::SymbolStringPtr &Name) {
-              return Name != MainName;
-            })));
+  if (!NoProcessSymbols) {
+    orc::ExecutionSession &ES = J->getExecutionSession();
+    auto FilterMainEntryPoint =
+        [EPName = ES.intern("main")](orc::SymbolStringPtr Name) {
+          return Name != EPName;
+        };
+
+    if (TPC)
+      J->getMainJITDylib().addGenerator(
+          ExitOnErr(orc::TPCDynamicLibrarySearchGenerator::GetForTargetProcess(
+              *TPC, std::move(FilterMainEntryPoint))));
+    else
+      J->getMainJITDylib().addGenerator(
+          ExitOnErr(orc::DynamicLibrarySearchGenerator::GetForCurrentProcess(
+              J->getDataLayout().getGlobalPrefix(),
+              std::move(FilterMainEntryPoint))));
+  }
 
   if (GenerateBuiltinFunctions.size() > 0)
     J->getMainJITDylib().addGenerator(
@@ -1165,8 +1180,8 @@ launchMCJITRemote(std::string ChildExecPath) {
 }
 
 Expected<std::unique_ptr<orc::shared::FDRawByteChannel>>
-launchJITLinkExecutor(std::string ChildExecPath) {
-#ifdef LLVM_ON_UNIX
+launchJITLinkExecutor(const char *ProgName, std::string ChildExecPath) {
+#ifndef LLVM_ON_UNIX
   // FIXME: Add support for Windows.
   return make_error<StringError>("-" + OutOfProcessExecutor.ArgStr +
                                      " not supported on non-unix platforms",
@@ -1175,13 +1190,17 @@ launchJITLinkExecutor(std::string ChildExecPath) {
   // If no executable was specified explicitly, then use a sensible default.
   if (ChildExecPath.empty()) {
     SmallString<256> OOPExecutorPath(sys::fs::getMainExecutable(
-        ArgV0, reinterpret_cast<void *>(&launchJITLinkExecutor)));
+        ProgName, reinterpret_cast<void *>(&launchJITLinkExecutor)));
     sys::path::remove_filename(OOPExecutorPath);
     if (OOPExecutorPath.back() != '/')
       OOPExecutorPath += '/';
     OOPExecutorPath += "llvm-jitlink-executor";
     ChildExecPath = OOPExecutorPath.str().str();
   }
+
+  if (!sys::fs::can_execute(ChildExecPath))
+    return make_error<StringError>("Unable to find usable executor executable: " + ChildExecPath,
+                                   inconvertibleErrorCode());
 
   constexpr int ReadEnd = 0;
   constexpr int WriteEnd = 1;
@@ -1233,6 +1252,12 @@ launchJITLinkExecutor(std::string ChildExecPath) {
   // Close the child ends of the pipes
   close(ToExecutor[ReadEnd]);
   close(FromExecutor[WriteEnd]);
+
+  if (WaitForDebugger) {
+    llvm::outs() << "Executor process launched with PID: " << ChildPID << "\n";
+    llvm::outs() << "Attach a debugger and press any key to continue.\n";
+    getchar();
+  }
 
   return std::make_unique<orc::shared::FDRawByteChannel>(FromExecutor[ReadEnd],
                                                          ToExecutor[WriteEnd]);

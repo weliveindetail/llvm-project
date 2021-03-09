@@ -80,6 +80,7 @@ public:
 
 private:
   LLIRemoteTargetProcessControl(
+      std::shared_ptr<orc::SymbolStringPool> SSP,
       std::unique_ptr<LLIRPCChannel> Channel,
       std::unique_ptr<LLIRPCEndpoint> Endpoint,
       ErrorReporter ReportError);
