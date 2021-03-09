@@ -19,7 +19,12 @@
 #include "llvm/Support/Error.h"
 #include "llvm/Support/ToolOutputFile.h"
 
+#include "llvm/ExecutionEngine/Orc/OrcRPCTargetProcessControl.h"
+#include "llvm/ExecutionEngine/Orc/Shared/FDRawByteChannel.h"
+#include "llvm/ExecutionEngine/Orc/Shared/RPCUtils.h"
+
 #include <memory>
+#include <thread>
 #include <utility>
 
 namespace llvm {
@@ -53,6 +58,41 @@ private:
   }
 
   static std::unique_ptr<ToolOutputFile> createToolOutput();
+};
+
+using LLIRPCChannel = orc::shared::FDRawByteChannel;
+using LLIRPCEndpoint =
+    orc::shared::MultiThreadedRPCEndpoint<LLIRPCChannel>;
+
+class LLIRemoteTargetProcessControl
+    : public orc::OrcRPCTargetProcessControlBase<LLIRPCEndpoint> {
+
+  using ThisT = LLIRemoteTargetProcessControl;
+  using BaseT = orc::OrcRPCTargetProcessControlBase<LLIRPCEndpoint>;
+  using MemoryAccess = orc::OrcRPCTPCMemoryAccess<ThisT>;
+  using MemoryManager = orc::OrcRPCTPCJITLinkMemoryManager<ThisT>;
+
+public:
+  static Error checkPlatformSupported(Triple &TT);
+
+  static Expected<std::unique_ptr<ThisT>>
+  Create(orc::ExecutionSession &ES, std::unique_ptr<LLIRPCChannel> Channel);
+
+private:
+  LLIRemoteTargetProcessControl(
+      std::unique_ptr<LLIRPCChannel> Channel,
+      std::unique_ptr<LLIRPCEndpoint> Endpoint,
+      ErrorReporter ReportError);
+
+  void initializeMemoryManagement();
+  Error disconnect() override;
+
+  std::unique_ptr<LLIRPCChannel> Channel;
+  std::unique_ptr<LLIRPCEndpoint> Endpoint;
+  std::unique_ptr<MemoryAccess> OwnedMemAccess;
+  std::unique_ptr<MemoryManager> OwnedMemMgr;
+  std::atomic<bool> Finished{false};
+  std::thread ListenerThread;
 };
 
 } // end namespace llvm

@@ -33,6 +33,7 @@
 #include "llvm/ExecutionEngine/Orc/LLJIT.h"
 #include "llvm/ExecutionEngine/Orc/MachOPlatform.h"
 #include "llvm/ExecutionEngine/Orc/OrcRemoteTargetClient.h"
+#include "llvm/ExecutionEngine/Orc/OrcRPCTargetProcessControl.h"
 #include "llvm/ExecutionEngine/Orc/RTDyldObjectLinkingLayer.h"
 #include "llvm/ExecutionEngine/Orc/SymbolStringPool.h"
 #include "llvm/ExecutionEngine/Orc/TPCDebugObjectRegistrar.h"
@@ -147,16 +148,17 @@ namespace {
     cl::desc("Execute MCJIT'ed code in a separate process."),
     cl::init(false));
 
-  // Manually specify the child process for remote execution. This overrides
-  // the simulated remote execution that allocates address space for child
-  // execution. The child process will be executed and will communicate with
-  // lli via stdin/stdout pipes.
-  cl::opt<std::string>
-  ChildExecPath("mcjit-remote-process",
-                cl::desc("Specify the filename of the process to launch "
-                         "for remote MCJIT execution.  If none is specified,"
-                         "\n\tremote execution will be simulated in-process."),
-                cl::value_desc("filename"), cl::init(""));
+  // File path of the executable to use for remote execution. The child process
+  // will be executed and will communicate with lli via stdin/stdout pipes.
+  cl::opt<std::string> OutOfProcessExecutor(
+    "oop-executor", cl::desc("Launch an out-of-process executor to run code"),
+    cl::value_desc("filename"), cl::ValueOptional);
+
+//  cl::opt<std::string>
+//  ChildExecPath("mcjit-remote-process",
+//                cl::desc("Specify the filename of the process to launch "
+//                         "for remote MCJIT execution."),
+//                cl::value_desc("filename"), cl::init(""));
 
   // Determine optimization level.
   cl::opt<char>
@@ -214,8 +216,8 @@ namespace {
 
   cl::opt<bool>
   NoLazyCompilation("disable-lazy-compilation",
-                  cl::desc("Disable JIT lazy compilation"),
-                  cl::init(false));
+                    cl::desc("Disable JIT lazy compilation in MCJIT"),
+                    cl::init(false));
 
   cl::opt<bool>
   GenerateSoftFloatCalls("soft-float",
@@ -418,6 +420,13 @@ static void reportError(SMDiagnostic Err, const char *ProgName) {
 Error loadDylibs();
 int runOrcLazyJIT(const char *ProgName);
 void disallowOrcOptions();
+
+// Launch the given executable in a new process and return a channel to it.
+Expected<std::unique_ptr<llvm::orc::shared::FDRawByteChannel>>
+launchMCJITRemote(std::string ChildExecPath);
+
+Expected<std::unique_ptr<orc::shared::FDRawByteChannel>>
+launchJITLinkExecutor(std::string ChildExecPath);
 
 //===----------------------------------------------------------------------===//
 // main Driver function
@@ -644,13 +653,13 @@ int main(int argc, char **argv, char * const *envp) {
     WithColor::note() << "defaulting to local execution\n";
     return -1;
 #else
-    if (ChildExecPath.empty()) {
+    if (OutOfProcessExecutor.empty()) {
       WithColor::error(errs(), argv[0])
-          << "-remote-mcjit requires -mcjit-remote-process.\n";
+          << "-remote-mcjit requires -oop-executor.\n";
       exit(1);
-    } else if (!sys::fs::can_execute(ChildExecPath)) {
+    } else if (!sys::fs::can_execute(OutOfProcessExecutor)) {
       WithColor::error(errs(), argv[0])
-          << "unable to find usable child executable: '" << ChildExecPath
+          << "unable to find usable child executable: '" << OutOfProcessExecutor
           << "'\n";
       return -1;
     }
@@ -708,7 +717,8 @@ int main(int argc, char **argv, char * const *envp) {
     // MCJIT itself. FIXME.
 
     // Lanch the remote process and get a channel to it.
-    std::unique_ptr<orc::shared::FDRawByteChannel> C = launchRemote();
+    Expected<std::unique_ptr<orc::shared::FDRawByteChannel>> C =
+        launchMCJITRemote(OutOfProcessExecutor);
     if (!C) {
       WithColor::error(errs(), argv[0]) << "failed to launch remote JIT.\n";
       exit(1);
@@ -718,7 +728,7 @@ int main(int argc, char **argv, char * const *envp) {
     llvm::orc::ExecutionSession ES;
     ES.setErrorReporter([&](Error Err) { ExitOnErr(std::move(Err)); });
     typedef orc::remote::OrcRemoteTargetClient MyRemote;
-    auto R = ExitOnErr(MyRemote::Create(*C, ES));
+    auto R = ExitOnErr(MyRemote::Create(**C, ES));
 
     // Create a remote memory manager.
     auto RemoteMM = ExitOnErr(R->createRemoteMemoryManager());
@@ -848,6 +858,7 @@ int runOrcLazyJIT(const char *ProgName) {
     });
 
   orc::LLLazyJITBuilder Builder;
+  auto ES = std::make_unique<orc::ExecutionSession>();
 
   Builder.setJITTargetMachineBuilder(
       TT ? orc::JITTargetMachineBuilder(*TT)
@@ -919,8 +930,15 @@ int runOrcLazyJIT(const char *ProgName) {
 
   std::unique_ptr<orc::TargetProcessControl> TPC = nullptr;
   if (JITLinker == JITLinkerKind::JITLink) {
-    TPC = ExitOnErr(orc::SelfTargetProcessControl::Create(
+    if (OutOfProcessExecutor.getNumOccurrences() == 0) {
+      // Initialize TPC for our own process.
+      TPC = ExitOnErr(orc::SelfTargetProcessControl::Create(
         std::make_shared<orc::SymbolStringPool>()));
+    } else {
+      // Lanch the remote process and initialize TPC for it.
+      TPC = ExitOnErr(LLIRemoteTargetProcessControl::Create(
+          *ES, ExitOnErr(launchJITLinkExecutor(OutOfProcessExecutor))));
+    }
 
     Builder.setObjectLinkingLayerCreator([&TPC](orc::ExecutionSession &ES,
                                                 const Triple &) {
@@ -933,6 +951,7 @@ int runOrcLazyJIT(const char *ProgName) {
     });
   }
 
+  Builder.setExecutionSession(std::move(ES));
   auto J = ExitOnErr(Builder.create());
 
   auto *ObjLayer = &J->getObjLinkingLayer();
@@ -1056,7 +1075,12 @@ int runOrcLazyJIT(const char *ProgName) {
     AltEntryThread.join();
 
   // Run destructors.
+  //if (TPC) {
+  //  ExitOnErr(J->getExecutionSession().endSession());
+  //  ExitOnErr(TPC->disconnect());
+  //} else {
   ExitOnErr(J->deinitialize(J->getMainJITDylib()));
+  //}
 
   return Result;
 }
@@ -1080,7 +1104,8 @@ void disallowOrcOptions() {
   }
 }
 
-std::unique_ptr<orc::shared::FDRawByteChannel> launchRemote() {
+Expected<std::unique_ptr<orc::shared::FDRawByteChannel>>
+launchMCJITRemote(std::string ChildExecPath) {
 #ifndef LLVM_ON_UNIX
   llvm_unreachable("launchRemote not supported on non-Unix platforms");
 #else
@@ -1089,7 +1114,8 @@ std::unique_ptr<orc::shared::FDRawByteChannel> launchRemote() {
 
   // Create two pipes.
   if (pipe(PipeFD[0]) != 0 || pipe(PipeFD[1]) != 0)
-    perror("Error creating pipe: ");
+    return make_error<StringError>("Unable to create pipe for executor",
+                                   inconvertibleErrorCode());
 
   ChildPID = fork();
 
@@ -1118,9 +1144,12 @@ std::unique_ptr<orc::shared::FDRawByteChannel> launchRemote() {
     }
 
     char * const args[] = { &ChildPath[0], &ChildIn[0], &ChildOut[0], nullptr };
-    int rc = execv(ChildExecPath.c_str(), args);
-    if (rc != 0)
-      perror("Error executing child process: ");
+    int RC = execv(ChildExecPath.c_str(), args);
+    if (RC != 0)
+      return make_error<StringError>(
+          "Unable to launch out-of-process executor \"" + ChildExecPath + "\"\n",
+          inconvertibleErrorCode());
+
     llvm_unreachable("Error executing child process");
   }
   // else we're the parent...
@@ -1132,5 +1161,80 @@ std::unique_ptr<orc::shared::FDRawByteChannel> launchRemote() {
   // Return an RPC channel connected to our end of the pipes.
   return std::make_unique<orc::shared::FDRawByteChannel>(PipeFD[1][0],
                                                          PipeFD[0][1]);
+#endif
+}
+
+Expected<std::unique_ptr<orc::shared::FDRawByteChannel>>
+launchJITLinkExecutor(std::string ChildExecPath) {
+#ifdef LLVM_ON_UNIX
+  // FIXME: Add support for Windows.
+  return make_error<StringError>("-" + OutOfProcessExecutor.ArgStr +
+                                     " not supported on non-unix platforms",
+                                 inconvertibleErrorCode());
+#else
+  // If no executable was specified explicitly, then use a sensible default.
+  if (ChildExecPath.empty()) {
+    SmallString<256> OOPExecutorPath(sys::fs::getMainExecutable(
+        ArgV0, reinterpret_cast<void *>(&launchJITLinkExecutor)));
+    sys::path::remove_filename(OOPExecutorPath);
+    if (OOPExecutorPath.back() != '/')
+      OOPExecutorPath += '/';
+    OOPExecutorPath += "llvm-jitlink-executor";
+    ChildExecPath = OOPExecutorPath.str().str();
+  }
+
+  constexpr int ReadEnd = 0;
+  constexpr int WriteEnd = 1;
+
+  // Pipe FDs.
+  int ToExecutor[2];
+  int FromExecutor[2];
+
+  // Create pipes to/from the executor..
+  if (pipe(ToExecutor) != 0 || pipe(FromExecutor) != 0)
+    return make_error<StringError>("Unable to create pipe for executor",
+                                   inconvertibleErrorCode());
+
+  pid_t ChildPID;
+  ChildPID = fork();
+
+  if (ChildPID == 0) {
+    // In the child...
+
+    // Close the parent ends of the pipes
+    close(ToExecutor[WriteEnd]);
+    close(FromExecutor[ReadEnd]);
+
+    // Execute the child process.
+    std::unique_ptr<char[]> ExecutorPath, FDSpecifier;
+    {
+      ExecutorPath = std::make_unique<char[]>(ChildExecPath.size() + 1);
+      strcpy(ExecutorPath.get(), ChildExecPath.data());
+
+      std::string FDSpecifierStr("filedescs=");
+      FDSpecifierStr += utostr(ToExecutor[ReadEnd]);
+      FDSpecifierStr += ',';
+      FDSpecifierStr += utostr(FromExecutor[WriteEnd]);
+      FDSpecifier = std::make_unique<char[]>(FDSpecifierStr.size() + 1);
+      strcpy(FDSpecifier.get(), FDSpecifierStr.c_str());
+    }
+
+    char *const Args[] = {ExecutorPath.get(), FDSpecifier.get(), nullptr};
+    int RC = execvp(ExecutorPath.get(), Args);
+    if (RC != 0)
+      return make_error<StringError>(
+          "Unable to launch out-of-process executor \"" + ChildExecPath + "\"\n",
+          inconvertibleErrorCode());
+
+    llvm_unreachable("Error executing child process");
+  }
+  // else we're the parent...
+
+  // Close the child ends of the pipes
+  close(ToExecutor[ReadEnd]);
+  close(FromExecutor[WriteEnd]);
+
+  return std::make_unique<orc::shared::FDRawByteChannel>(FromExecutor[ReadEnd],
+                                                         ToExecutor[WriteEnd]);
 #endif
 }

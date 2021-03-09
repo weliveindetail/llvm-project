@@ -143,4 +143,82 @@ LLIBuiltinFunctionGenerator::createToolOutput() {
   return TestOut;
 }
 
+
+
+LLIRemoteTargetProcessControl::LLIRemoteTargetProcessControl(
+    std::unique_ptr<LLIRPCChannel> Channel,
+    std::unique_ptr<LLIRPCEndpoint> Endpoint,
+    ErrorReporter ReportError)
+    : BaseT(std::make_shared<orc::SymbolStringPool>(), *Endpoint,
+            std::move(ReportError)),
+      Channel(std::move(Channel)), Endpoint(std::move(Endpoint)) {
+
+  ListenerThread = std::thread([&]() {
+    while (!Finished) {
+      if (auto Err = this->Endpoint->handleOne()) {
+        reportError(std::move(Err));
+        return;
+      }
+    }
+  });
+}
+
+// static
+Error LLIRemoteTargetProcessControl::checkPlatformSupported(Triple &TT) {
+  Triple::ArchType Arch = TT.getArch();
+  if (TT.isOSBinFormatELF()) {
+    if (Arch != Triple::x86_64)
+      return make_error<StringError>(
+          "Out-of-process execution for ELF only supported on x86-64 targets",
+          inconvertibleErrorCode());
+  }
+  if (TT.isOSBinFormatMachO()) {
+    if (Arch != Triple::aarch64 && Arch != Triple::x86_64)
+      return make_error<StringError>(
+          "Out-of-process execution for MachO only supported on ARM64 and "
+          "x86-64 targets",
+          inconvertibleErrorCode());
+  }
+  return Error::success();
+}
+
+// static
+Expected<std::unique_ptr<LLIRemoteTargetProcessControl>>
+LLIRemoteTargetProcessControl::Create(orc::ExecutionSession &ES,
+                                      std::unique_ptr<LLIRPCChannel> Channel) {
+  auto Endpoint = std::make_unique<LLIRPCEndpoint>(*Channel, true);
+  std::unique_ptr<LLIRemoteTargetProcessControl> TPC(
+      new LLIRemoteTargetProcessControl(
+          std::move(Channel), std::move(Endpoint),
+          [&ES](Error Err) { ES.reportError(std::move(Err)); }));
+
+  if (auto Err = TPC->initializeORCRPCTPCBase())
+    return joinErrors(std::move(Err), TPC->disconnect());
+
+  TPC->initializeMemoryManagement();
+  return std::move(TPC);
+}
+
+void LLIRemoteTargetProcessControl::initializeMemoryManagement() {
+  OwnedMemAccess = std::make_unique<MemoryAccess>(*this);
+  OwnedMemMgr = std::make_unique<MemoryManager>(*this);
+
+  // Base class needs non-owning access.
+  MemAccess = OwnedMemAccess.get();
+  MemMgr = OwnedMemMgr.get();
+}
+
+Error LLIRemoteTargetProcessControl::disconnect() {
+  std::promise<MSVCPError> P;
+  auto F = P.get_future();
+  auto Err = closeConnection([&](Error Err) -> Error {
+    P.set_value(std::move(Err));
+    Finished = true;
+    return Error::success();
+  });
+  ListenerThread.join();
+  return joinErrors(std::move(Err), F.get());
+}
+
+
 } // namespace llvm
