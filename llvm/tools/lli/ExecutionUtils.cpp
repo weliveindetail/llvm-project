@@ -220,5 +220,4 @@ Error LLIRemoteTargetProcessControl::disconnect() {
   return joinErrors(std::move(Err), F.get());
 }
 
-
 } // namespace llvm

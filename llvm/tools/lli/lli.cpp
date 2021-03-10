@@ -940,11 +940,14 @@ int runOrcLazyJIT(const char *ProgName) {
       TPC = ExitOnErr(orc::SelfTargetProcessControl::Create(
         std::make_shared<orc::SymbolStringPool>()));
     } else {
-      // Lanch the remote process and initialize TPC for it.
+      // Launch the remote process and initialize TPC for it.
       TPC = ExitOnErr(LLIRemoteTargetProcessControl::Create(
           *ES, ExitOnErr(launchJITLinkExecutor(ProgName, OutOfProcessExecutor))));
+      Builder.setIndirectStubsManagerBuilder();
+      Builder.setLazyCallthroughManager();
     }
 
+    Builder.setTargetProcessControl(*TPC);
     Builder.setObjectLinkingLayerCreator([&TPC](orc::ExecutionSession &ES,
                                                 const Triple &) {
       auto L = std::make_unique<orc::ObjectLinkingLayer>(ES, TPC->getMemMgr());
