@@ -84,7 +84,7 @@ static codegen::RegisterCodeGenFlags CGF;
 
 namespace {
 
-  enum class JITKind { MCJIT, OrcLazy };
+  enum class JITKind { MCJIT, Orc, OrcLazy };
   enum class JITLinkerKind { Default, RuntimeDyld, JITLink };
 
   cl::opt<std::string>
@@ -101,8 +101,9 @@ namespace {
       "jit-kind", cl::desc("Choose underlying JIT kind."),
       cl::init(JITKind::MCJIT),
       cl::values(clEnumValN(JITKind::MCJIT, "mcjit", "MCJIT"),
+                 clEnumValN(JITKind::Orc, "orc", "Orc JIT"),
                  clEnumValN(JITKind::OrcLazy, "orc-lazy",
-                            "Orc-based lazy JIT.")));
+                            "Orc-based lazy JIT")));
 
   cl::opt<JITLinkerKind>
       JITLinker("jit-linker", cl::desc("Choose the dynamic linker/loader."),
@@ -443,7 +444,7 @@ int main(int argc, char **argv, char * const *envp) {
 
   ExitOnErr(loadDylibs());
 
-  if (UseJITKind == JITKind::OrcLazy)
+  if (UseJITKind != JITKind::MCJIT)
     return runOrcLazyJIT(argv[0]);
   else
     disallowOrcOptions();
@@ -976,7 +977,10 @@ int runOrcLazyJIT(const char *ProgName) {
                                                       Mangle));
 
   // Add the main module.
-  ExitOnErr(J->addLazyIRModule(std::move(MainModule)));
+  if (UseJITKind == JITKind::OrcLazy)
+    ExitOnErr(J->addLazyIRModule(std::move(MainModule)));
+  else
+    ExitOnErr(J->addIRModule(std::move(MainModule)));
 
   // Create JITDylibs and add any extra modules.
   {
