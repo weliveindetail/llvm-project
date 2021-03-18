@@ -1,5 +1,5 @@
 ; PR672
-; RUN: %lli %s
+; RUN: %lli -jit-kind=mcjit %s
 ; XFAIL: mcjit-ia32
 
 define i32 @main() {

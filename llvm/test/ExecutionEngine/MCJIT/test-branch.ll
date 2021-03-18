@@ -1,4 +1,4 @@
-; RUN: %lli %s > /dev/null
+; RUN: %lli -jit-kind=mcjit %s > /dev/null
 
 ; test unconditional branch
 define i32 @main() {

@@ -1,4 +1,4 @@
-; RUN: %lli %s > /dev/null
+; RUN: %lli -jit-kind=mcjit %s > /dev/null
 
 define double @test(double* %DP, double %Arg) {
 	%D = load double, double* %DP		; <double> [#uses=1]

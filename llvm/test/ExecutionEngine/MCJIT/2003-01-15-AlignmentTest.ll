@@ -1,4 +1,4 @@
-; RUN: %lli %s > /dev/null
+; RUN: %lli -jit-kind=mcjit %s > /dev/null
 
 define i32 @bar(i8* %X) {
         ; pointer should be 4 byte aligned!

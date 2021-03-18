@@ -1,4 +1,4 @@
-; RUN: %lli %s
+; RUN: %lli -jit-kind=mcjit %s
 ;
 ; Verify relocations to global symbols with addend work correctly.
 ;
