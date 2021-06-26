@@ -43,6 +43,10 @@ Expected<std::unique_ptr<SelfTargetProcessControl>>
 SelfTargetProcessControl::Create(
     std::shared_ptr<SymbolStringPool> SSP,
     std::unique_ptr<jitlink::JITLinkMemoryManager> MemMgr) {
+
+  if (!SSP)
+    SSP = std::make_shared<SymbolStringPool>();
+
   auto PageSize = sys::Process::getPageSize();
   if (!PageSize)
     return PageSize.takeError();

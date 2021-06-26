@@ -17,9 +17,9 @@
 #include "llvm/ADT/StringRef.h"
 #include "llvm/ADT/Triple.h"
 #include "llvm/ExecutionEngine/JITLink/JITLinkMemoryManager.h"
-#include "llvm/ExecutionEngine/Orc/Core.h"
 #include "llvm/ExecutionEngine/Orc/Shared/TargetProcessControlTypes.h"
 #include "llvm/ExecutionEngine/Orc/Shared/WrapperFunctionUtils.h"
+#include "llvm/ExecutionEngine/Orc/SymbolStringPool.h"
 #include "llvm/Support/DynamicLibrary.h"
 #include "llvm/Support/MSVCErrorWorkarounds.h"
 
@@ -28,6 +28,8 @@
 
 namespace llvm {
 namespace orc {
+
+class SymbolLookupSet;
 
 /// TargetProcessControl supports interaction with a JIT target process.
 class TargetProcessControl {
@@ -114,10 +116,16 @@ public:
   unsigned getPageSize() const { return PageSize; }
 
   /// Return a MemoryAccess object for the target process.
-  MemoryAccess &getMemoryAccess() const { return *MemAccess; }
+  MemoryAccess &getMemoryAccess() const {
+    assert(MemAccess && "No MemAccess object set.");
+    return *MemAccess;
+  }
 
   /// Return a JITLinkMemoryManager for the target process.
-  jitlink::JITLinkMemoryManager &getMemMgr() const { return *MemMgr; }
+  jitlink::JITLinkMemoryManager &getMemMgr() const {
+    assert(MemMgr && "No MemMgr object set");
+    return *MemMgr;
+  }
 
   /// Load the dynamic library at the given path and return a handle to it.
   /// If LibraryPath is null this function will return the global handle for
@@ -178,6 +186,43 @@ private:
   JITTargetAddress WrapperFnAddr;
 };
 
+/// A TargetProcessControl instance that asserts if any of its methods are used.
+/// Suitable for use is unit tests, and by ORC clients who haven't moved to
+/// TargetProcessControl-based APIs yet.
+class UnsupportedTargetProcessControl : public TargetProcessControl {
+public:
+  UnsupportedTargetProcessControl(
+      std::shared_ptr<SymbolStringPool> SSP = nullptr,
+      const std::string &TT = "", unsigned PageSize = 0)
+      : TargetProcessControl(SSP ? std::move(SSP)
+                                 : std::make_shared<SymbolStringPool>()) {
+    this->TargetTriple = Triple(TT);
+    this->PageSize = PageSize;
+  }
+
+  Expected<tpctypes::DylibHandle> loadDylib(const char *DylibPath) override {
+    llvm_unreachable("Unsupported");
+  }
+
+  Expected<std::vector<tpctypes::LookupResult>>
+  lookupSymbols(ArrayRef<LookupRequest> Request) override {
+    llvm_unreachable("Unsupported");
+  }
+
+  Expected<int32_t> runAsMain(JITTargetAddress MainFnAddr,
+                              ArrayRef<std::string> Args) override {
+    llvm_unreachable("Unsupported");
+  }
+
+  Expected<shared::WrapperFunctionResult>
+  runWrapper(JITTargetAddress WrapperFnAddr,
+             ArrayRef<char> ArgBuffer) override {
+    llvm_unreachable("Unsupported");
+  }
+
+  Error disconnect() override { llvm_unreachable("Unsupported"); }
+};
+
 /// A TargetProcessControl implementation targeting the current process.
 class SelfTargetProcessControl : public TargetProcessControl,
                                  private TargetProcessControl::MemoryAccess {
@@ -186,11 +231,13 @@ public:
       std::shared_ptr<SymbolStringPool> SSP, Triple TargetTriple,
       unsigned PageSize, std::unique_ptr<jitlink::JITLinkMemoryManager> MemMgr);
 
-  /// Create a SelfTargetProcessControl with the given memory manager.
+  /// Create a SelfTargetProcessControl with the given symbol string pool and
+  /// memory manager.
+  /// If no symbol string pool is given then one will be created.
   /// If no memory manager is given a jitlink::InProcessMemoryManager will
-  /// be used by default.
+  /// be created and used by default.
   static Expected<std::unique_ptr<SelfTargetProcessControl>>
-  Create(std::shared_ptr<SymbolStringPool> SSP,
+  Create(std::shared_ptr<SymbolStringPool> SSP = nullptr,
          std::unique_ptr<jitlink::JITLinkMemoryManager> MemMgr = nullptr);
 
   Expected<tpctypes::DylibHandle> loadDylib(const char *DylibPath) override;

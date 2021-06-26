@@ -976,16 +976,9 @@ Error LLJITBuilderState::prepareForConstruction() {
       JTMB->setRelocationModel(Reloc::PIC_);
       JTMB->setCodeModel(CodeModel::Small);
       CreateObjectLinkingLayer =
-          [TPC = this->TPC](
-              ExecutionSession &ES,
-              const Triple &) -> Expected<std::unique_ptr<ObjectLayer>> {
-        std::unique_ptr<ObjectLinkingLayer> ObjLinkingLayer;
-        if (TPC)
-          ObjLinkingLayer =
-              std::make_unique<ObjectLinkingLayer>(ES, TPC->getMemMgr());
-        else
-          ObjLinkingLayer = std::make_unique<ObjectLinkingLayer>(
-              ES, std::make_unique<jitlink::InProcessMemoryManager>());
+          [](ExecutionSession &ES,
+             const Triple &) -> Expected<std::unique_ptr<ObjectLayer>> {
+        auto ObjLinkingLayer = std::make_unique<ObjectLinkingLayer>(ES);
         ObjLinkingLayer->addPlugin(std::make_unique<EHFrameRegistrationPlugin>(
             ES, std::make_unique<jitlink::InProcessEHFrameRegistrar>()));
         return std::move(ObjLinkingLayer);
@@ -1079,10 +1072,24 @@ LLJIT::createCompileFunction(LLJITBuilderState &S,
 }
 
 LLJIT::LLJIT(LLJITBuilderState &S, Error &Err)
-    : ES(S.ES ? std::move(S.ES) : std::make_unique<ExecutionSession>()), Main(),
-      DL(""), TT(S.JTMB->getTargetTriple()) {
+    : DL(""), TT(S.JTMB->getTargetTriple()) {
 
   ErrorAsOutParameter _(&Err);
+
+  assert(!(S.TPC && S.ES) && "TPC and ES should not both be set");
+
+  if (S.TPC) {
+    ES = std::make_unique<ExecutionSession>(std::move(S.TPC));
+  } else if (S.ES)
+    ES = std::move(S.ES);
+  else {
+    if (auto TPC = SelfTargetProcessControl::Create()) {
+      ES = std::make_unique<ExecutionSession>(std::move(*TPC));
+    } else {
+      Err = TPC.takeError();
+      return;
+    }
+  }
 
   if (auto MainOrErr = this->ES->createJITDylib("main"))
     Main = &*MainOrErr;

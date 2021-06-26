@@ -19,7 +19,7 @@
 #include "llvm/ADT/IntrusiveRefCntPtr.h"
 #include "llvm/ExecutionEngine/JITLink/JITLinkDylib.h"
 #include "llvm/ExecutionEngine/JITSymbol.h"
-#include "llvm/ExecutionEngine/Orc/SymbolStringPool.h"
+#include "llvm/ExecutionEngine/Orc/TargetProcessControl.h"
 #include "llvm/ExecutionEngine/OrcV1Deprecation.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/ExtensibleRTTI.h"
@@ -1264,19 +1264,17 @@ public:
   /// For dispatching ORC tasks (typically materialization tasks).
   using DispatchTaskFunction = unique_function<void(std::unique_ptr<Task> T)>;
 
-  /// Construct an ExecutionSession.
-  ///
-  /// SymbolStringPools may be shared between ExecutionSessions.
-  ExecutionSession(std::shared_ptr<SymbolStringPool> SSP = nullptr);
+  /// Construct an ExecutionSession with the given TargetProcessControl object.
+  ExecutionSession(std::unique_ptr<TargetProcessControl> TPC);
 
   /// End the session. Closes all JITDylibs.
   Error endSession();
 
-  /// Add a symbol name to the SymbolStringPool and return a pointer to it.
-  SymbolStringPtr intern(StringRef SymName) { return SSP->intern(SymName); }
+  /// Get the TargetProcessControl object associated with this ExecutionSession.
+  TargetProcessControl &getTargetProcessControl() { return *TPC; }
 
-  /// Returns a shared_ptr to the SymbolStringPool for this ExecutionSession.
-  std::shared_ptr<SymbolStringPool> getSymbolStringPool() const { return SSP; }
+  /// Add a symbol name to the SymbolStringPool and return a pointer to it.
+  SymbolStringPtr intern(StringRef SymName) { return TPC->intern(SymName); }
 
   /// Set the Platform for this ExecutionSession.
   void setPlatform(std::unique_ptr<Platform> P) { this->P = std::move(P); }
@@ -1501,7 +1499,7 @@ private:
 
   mutable std::recursive_mutex SessionMutex;
   bool SessionOpen = true;
-  std::shared_ptr<SymbolStringPool> SSP;
+  std::unique_ptr<TargetProcessControl> TPC;
   std::unique_ptr<Platform> P;
   ErrorReporter ReportError = logErrorsToStdErr;
   DispatchTaskFunction DispatchTask = runOnCurrentThread;

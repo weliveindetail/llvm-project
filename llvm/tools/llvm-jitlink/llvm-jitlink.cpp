@@ -828,7 +828,8 @@ Session::~Session() {
 // FIXME: Move to createJITDylib if/when we start using Platform support in
 // llvm-jitlink.
 Session::Session(std::unique_ptr<TargetProcessControl> TPC, Error &Err)
-    : TPC(std::move(TPC)), ObjLayer(*this, this->TPC->getMemMgr()) {
+    : ES(std::move(TPC)),
+      ObjLayer(*this, ES.getTargetProcessControl().getMemMgr()) {
 
   /// Local ObjectLinkingLayer::Plugin class to forward modifyPassConfig to the
   /// Session.
@@ -862,11 +863,12 @@ Session::Session(std::unique_ptr<TargetProcessControl> TPC, Error &Err)
     return;
   }
 
-  if (!NoExec && !this->TPC->getTargetTriple().isOSWindows()) {
+  if (!NoExec &&
+      !ES.getTargetProcessControl().getTargetTriple().isOSWindows()) {
     ObjLayer.addPlugin(std::make_unique<EHFrameRegistrationPlugin>(
-        ES, ExitOnErr(TPCEHFrameRegistrar::Create(*this->TPC))));
+        ES, ExitOnErr(TPCEHFrameRegistrar::Create(this->ES))));
     ObjLayer.addPlugin(std::make_unique<DebugObjectManagerPlugin>(
-        ES, ExitOnErr(createJITLoaderGDBRegistrar(*this->TPC))));
+        ES, ExitOnErr(createJITLoaderGDBRegistrar(this->ES))));
   }
 
   ObjLayer.addPlugin(std::make_unique<JITLinkSessionPlugin>(*this));
@@ -913,10 +915,11 @@ void Session::modifyPassConfig(const Triple &TT,
                                PassConfiguration &PassConfig) {
   if (!CheckFiles.empty())
     PassConfig.PostFixupPasses.push_back([this](LinkGraph &G) {
-      if (TPC->getTargetTriple().getObjectFormat() == Triple::ELF)
+      auto &TPC = ES.getTargetProcessControl();
+      if (TPC.getTargetTriple().getObjectFormat() == Triple::ELF)
         return registerELFGraphInfo(*this, G);
 
-      if (TPC->getTargetTriple().getObjectFormat() == Triple::MachO)
+      if (TPC.getTargetTriple().getObjectFormat() == Triple::MachO)
         return registerMachOGraphInfo(*this, G);
 
       return make_error<StringError>("Unsupported object format for GOT/stub "
@@ -1095,14 +1098,14 @@ static Error loadProcessSymbols(Session &S) {
       };
   S.MainJD->addGenerator(
       ExitOnErr(orc::TPCDynamicLibrarySearchGenerator::GetForTargetProcess(
-          *S.TPC, std::move(FilterMainEntryPoint))));
+          S.ES, std::move(FilterMainEntryPoint))));
 
   return Error::success();
 }
 
 static Error loadDylibs(Session &S) {
   for (const auto &Dylib : Dylibs) {
-    auto G = orc::TPCDynamicLibrarySearchGenerator::Load(*S.TPC, Dylib.c_str());
+    auto G = orc::TPCDynamicLibrarySearchGenerator::Load(S.ES, Dylib.c_str());
     if (!G)
       return G.takeError();
     S.MainJD->addGenerator(std::move(*G));
@@ -1178,7 +1181,8 @@ static Error loadObjects(Session &S) {
     if (Magic == file_magic::archive ||
         Magic == file_magic::macho_universal_binary)
       JD.addGenerator(ExitOnErr(StaticLibraryDefinitionGenerator::Load(
-          S.ObjLayer, InputFile.c_str(), S.TPC->getTargetTriple())));
+          S.ObjLayer, InputFile.c_str(),
+          S.ES.getTargetProcessControl().getTargetTriple())));
     else
       ExitOnErr(S.ObjLayer.add(JD, std::move(ObjBuffer)));
   }
@@ -1225,8 +1229,9 @@ static Error loadObjects(Session &S) {
 }
 
 static Error runChecks(Session &S) {
+  auto &TPC = S.ES.getTargetProcessControl();
 
-  auto TripleName = S.TPC->getTargetTriple().str();
+  auto TripleName = TPC.getTargetTriple().str();
   std::string ErrorStr;
   const Target *TheTarget = TargetRegistry::lookupTarget(TripleName, ErrorStr);
   if (!TheTarget)
@@ -1292,8 +1297,7 @@ static Error runChecks(Session &S) {
 
   RuntimeDyldChecker Checker(
       IsSymbolValid, GetSymbolInfo, GetSectionInfo, GetStubInfo, GetGOTInfo,
-      S.TPC->getTargetTriple().isLittleEndian() ? support::little
-                                                : support::big,
+      TPC.getTargetTriple().isLittleEndian() ? support::little : support::big,
       Disassembler.get(), InstPrinter.get(), dbgs());
 
   std::string CheckLineStart = "# " + CheckName + ":";
@@ -1381,11 +1385,12 @@ int main(int argc, char *argv[]) {
   int Result = 0;
   {
     TimeRegion TR(Timers ? &Timers->RunTimer : nullptr);
-    Result = ExitOnErr(S->TPC->runAsMain(EntryPoint.getAddress(), InputArgv));
+    auto &TPC = S->ES.getTargetProcessControl();
+    Result = ExitOnErr(TPC.runAsMain(EntryPoint.getAddress(), InputArgv));
   }
 
   ExitOnErr(S->ES.endSession());
-  ExitOnErr(S->TPC->disconnect());
+  ExitOnErr(S->ES.getTargetProcessControl().disconnect());
 
   return Result;
 }

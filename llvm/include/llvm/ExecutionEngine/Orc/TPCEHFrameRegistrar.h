@@ -14,10 +14,11 @@
 #define LLVM_EXECUTIONENGINE_ORC_TPCEHFRAMEREGISTRAR_H
 
 #include "llvm/ExecutionEngine/JITLink/EHFrameSupport.h"
-#include "llvm/ExecutionEngine/Orc/TargetProcessControl.h"
 
 namespace llvm {
 namespace orc {
+
+class ExecutionSession;
 
 /// Register/Deregisters EH frames in a remote process via a
 /// TargetProcessControl instance.
@@ -27,14 +28,14 @@ public:
   /// the TPC's lookupSymbols method to find the registration/deregistration
   /// funciton addresses by name.
   static Expected<std::unique_ptr<TPCEHFrameRegistrar>>
-  Create(TargetProcessControl &TPC);
+  Create(ExecutionSession &ES);
 
   /// Create a TPCEHFrameRegistrar with the given TargetProcessControl
   /// object and registration/deregistration function addresses.
-  TPCEHFrameRegistrar(TargetProcessControl &TPC,
+  TPCEHFrameRegistrar(ExecutionSession &ES,
                       JITTargetAddress RegisterEHFrameWrapperFnAddr,
                       JITTargetAddress DeregisterEHFRameWrapperFnAddr)
-      : TPC(TPC), RegisterEHFrameWrapperFnAddr(RegisterEHFrameWrapperFnAddr),
+      : ES(ES), RegisterEHFrameWrapperFnAddr(RegisterEHFrameWrapperFnAddr),
         DeregisterEHFrameWrapperFnAddr(DeregisterEHFRameWrapperFnAddr) {}
 
   Error registerEHFrames(JITTargetAddress EHFrameSectionAddr,
@@ -43,7 +44,7 @@ public:
                            size_t EHFrameSectionSize) override;
 
 private:
-  TargetProcessControl &TPC;
+  ExecutionSession &ES;
   JITTargetAddress RegisterEHFrameWrapperFnAddr;
   JITTargetAddress DeregisterEHFrameWrapperFnAddr;
 };

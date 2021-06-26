@@ -248,7 +248,8 @@ void LLVMOrcExecutionSessionSetErrorReporter(
 
 LLVMOrcSymbolStringPoolRef
 LLVMOrcExecutionSessionGetSymbolStringPool(LLVMOrcExecutionSessionRef ES) {
-  return wrap(unwrap(ES)->getSymbolStringPool().get());
+  return wrap(
+      unwrap(ES)->getTargetProcessControl().getSymbolStringPool().get());
 }
 
 void LLVMOrcSymbolStringPoolClearDeadEntries(LLVMOrcSymbolStringPoolRef SSP) {

@@ -16,7 +16,8 @@ namespace llvm {
 namespace orc {
 
 Expected<std::unique_ptr<TPCDebugObjectRegistrar>>
-createJITLoaderGDBRegistrar(TargetProcessControl &TPC) {
+createJITLoaderGDBRegistrar(ExecutionSession &ES) {
+  auto &TPC = ES.getTargetProcessControl();
   auto ProcessHandle = TPC.loadDylib(nullptr);
   if (!ProcessHandle)
     return ProcessHandle.takeError();
@@ -37,7 +38,14 @@ createJITLoaderGDBRegistrar(TargetProcessControl &TPC) {
   assert((*Result)[0].size() == 1 &&
          "Unexpected number of addresses in result");
 
-  return std::make_unique<TPCDebugObjectRegistrar>(TPC, (*Result)[0][0]);
+  return std::make_unique<TPCDebugObjectRegistrar>(ES, (*Result)[0][0]);
+}
+
+Error TPCDebugObjectRegistrar::registerDebugObject(sys::MemoryBlock TargetMem) {
+  return WrapperFunction<void(SPSTargetAddress, uint64_t)>::call(
+      TPCCaller(ES.getTargetProcessControl(), RegisterFn),
+      pointerToJITTargetAddress(TargetMem.base()),
+      static_cast<uint64_t>(TargetMem.allocatedSize()));
 }
 
 } // namespace orc

@@ -22,8 +22,8 @@
 #include "llvm/Config/llvm-config.h"
 #include "llvm/ExecutionEngine/GenericValue.h"
 #include "llvm/ExecutionEngine/Interpreter.h"
-#include "llvm/ExecutionEngine/JITSymbol.h"
 #include "llvm/ExecutionEngine/JITEventListener.h"
+#include "llvm/ExecutionEngine/JITSymbol.h"
 #include "llvm/ExecutionEngine/MCJIT.h"
 #include "llvm/ExecutionEngine/ObjectCache.h"
 #include "llvm/ExecutionEngine/Orc/DebugObjectManagerPlugin.h"
@@ -40,6 +40,7 @@
 #include "llvm/ExecutionEngine/Orc/TargetProcess/JITLoaderGDB.h"
 #include "llvm/ExecutionEngine/Orc/TargetProcess/RegisterEHFrames.h"
 #include "llvm/ExecutionEngine/Orc/TargetProcess/TargetExecutionUtils.h"
+#include "llvm/ExecutionEngine/Orc/TargetProcessControl.h"
 #include "llvm/ExecutionEngine/SectionMemoryManager.h"
 #include "llvm/IR/IRBuilder.h"
 #include "llvm/IR/LLVMContext.h"
@@ -720,7 +721,8 @@ int main(int argc, char **argv, char * const *envp) {
     }
 
     // Create a remote target client running over the channel.
-    llvm::orc::ExecutionSession ES;
+    llvm::orc::ExecutionSession ES(
+        std::make_unique<orc::UnsupportedTargetProcessControl>());
     ES.setErrorReporter([&](Error Err) { ExitOnErr(std::move(Err)); });
     typedef orc::remote::OrcRemoteTargetClient MyRemote;
     auto R = ExitOnErr(MyRemote::Create(*C, ES));
@@ -877,7 +879,8 @@ int runOrcJIT(const char *ProgName) {
   // JIT builder to instantiate a default (which would fail with an error for
   // unsupported architectures).
   if (UseJITKind != JITKind::OrcLazy) {
-    auto ES = std::make_unique<orc::ExecutionSession>();
+    auto TPC = ExitOnErr(orc::SelfTargetProcessControl::Create());
+    auto ES = std::make_unique<orc::ExecutionSession>(std::move(TPC));
     Builder.setLazyCallthroughManager(
         std::make_unique<orc::LazyCallThroughManager>(*ES, 0, nullptr));
     Builder.setExecutionSession(std::move(ES));
@@ -936,20 +939,16 @@ int runOrcJIT(const char *ProgName) {
     }
   }
 
-  std::unique_ptr<orc::TargetProcessControl> TPC = nullptr;
   if (JITLinker == JITLinkerKind::JITLink) {
-    TPC = ExitOnErr(orc::SelfTargetProcessControl::Create(
-        std::make_shared<orc::SymbolStringPool>()));
-
-    Builder.setObjectLinkingLayerCreator([&TPC](orc::ExecutionSession &ES,
-                                                const Triple &) {
-      auto L = std::make_unique<orc::ObjectLinkingLayer>(ES, TPC->getMemMgr());
-      L->addPlugin(std::make_unique<orc::EHFrameRegistrationPlugin>(
-          ES, ExitOnErr(orc::TPCEHFrameRegistrar::Create(*TPC))));
-      L->addPlugin(std::make_unique<orc::DebugObjectManagerPlugin>(
-          ES, ExitOnErr(orc::createJITLoaderGDBRegistrar(*TPC))));
-      return L;
-    });
+    Builder.setObjectLinkingLayerCreator(
+        [](orc::ExecutionSession &ES, const Triple &) {
+          auto L = std::make_unique<orc::ObjectLinkingLayer>(ES);
+          L->addPlugin(std::make_unique<orc::EHFrameRegistrationPlugin>(
+              ES, ExitOnErr(orc::TPCEHFrameRegistrar::Create(ES))));
+          L->addPlugin(std::make_unique<orc::DebugObjectManagerPlugin>(
+              ES, ExitOnErr(orc::createJITLoaderGDBRegistrar(ES))));
+          return L;
+        });
   }
 
   auto J = ExitOnErr(Builder.create());
@@ -1069,9 +1068,11 @@ int runOrcJIT(const char *ProgName) {
   JITEvaluatedSymbol MainSym = ExitOnErr(J->lookup(EntryFunc));
   int Result;
 
-  if (TPC) {
+  if (JITLinker == JITLinkerKind::JITLink) {
     // TargetProcessControl-based execution with JITLink.
-    Result = ExitOnErr(TPC->runAsMain(MainSym.getAddress(), InputArgv));
+    Result =
+        ExitOnErr(J->getExecutionSession().getTargetProcessControl().runAsMain(
+            MainSym.getAddress(), InputArgv));
   } else {
     // Manual in-process execution with RuntimeDyld.
     using MainFnTy = int(int, char *[]);

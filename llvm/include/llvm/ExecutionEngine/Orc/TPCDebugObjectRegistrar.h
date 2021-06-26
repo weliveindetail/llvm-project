@@ -14,7 +14,7 @@
 #define LLVM_EXECUTIONENGINE_ORC_TPCDEBUGOBJECTREGISTRAR_H
 
 #include "llvm/ExecutionEngine/JITSymbol.h"
-#include "llvm/ExecutionEngine/Orc/TargetProcessControl.h"
+#include "llvm/ExecutionEngine/Orc/Shared/WrapperFunctionUtils.h"
 #include "llvm/Support/Error.h"
 #include "llvm/Support/Memory.h"
 
@@ -27,6 +27,9 @@ using namespace llvm::orc::shared;
 namespace llvm {
 namespace orc {
 
+class ExecutionSession;
+class TargetProcessControl;
+
 /// Abstract interface for registering debug objects in the target process.
 class DebugObjectRegistrar {
 public:
@@ -38,25 +41,20 @@ public:
 /// target process.
 class TPCDebugObjectRegistrar : public DebugObjectRegistrar {
 public:
-  TPCDebugObjectRegistrar(TargetProcessControl &TPC,
-                          JITTargetAddress RegisterFn)
-      : TPC(TPC), RegisterFn(RegisterFn) {}
+  TPCDebugObjectRegistrar(ExecutionSession &ES, JITTargetAddress RegisterFn)
+      : ES(ES), RegisterFn(RegisterFn) {}
 
-  Error registerDebugObject(sys::MemoryBlock TargetMem) override {
-    return WrapperFunction<void(SPSTargetAddress, uint64_t)>::call(
-        TPCCaller(TPC, RegisterFn), pointerToJITTargetAddress(TargetMem.base()),
-        static_cast<uint64_t>(TargetMem.allocatedSize()));
-  }
+  Error registerDebugObject(sys::MemoryBlock TargetMem) override;
 
 private:
-  TargetProcessControl &TPC;
+  ExecutionSession &ES;
   JITTargetAddress RegisterFn;
 };
 
 /// Create a TargetProcessControl-based DebugObjectRegistrar that emits debug
 /// objects to the GDB JIT interface.
 Expected<std::unique_ptr<TPCDebugObjectRegistrar>>
-createJITLoaderGDBRegistrar(TargetProcessControl &TPC);
+createJITLoaderGDBRegistrar(ExecutionSession &ES);
 
 } // end namespace orc
 } // end namespace llvm

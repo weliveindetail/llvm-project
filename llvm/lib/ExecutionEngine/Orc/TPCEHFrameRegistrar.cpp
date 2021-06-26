@@ -7,6 +7,8 @@
 //===----------------------------------------------------------------------===//
 
 #include "llvm/ExecutionEngine/Orc/TPCEHFrameRegistrar.h"
+
+#include "llvm/ExecutionEngine/Orc/Core.h"
 #include "llvm/Support/BinaryStreamWriter.h"
 
 using namespace llvm::orc::shared;
@@ -15,12 +17,14 @@ namespace llvm {
 namespace orc {
 
 Expected<std::unique_ptr<TPCEHFrameRegistrar>>
-TPCEHFrameRegistrar::Create(TargetProcessControl &TPC) {
+TPCEHFrameRegistrar::Create(ExecutionSession &ES) {
   // FIXME: Proper mangling here -- we really need to decouple linker mangling
   // from DataLayout.
 
   // Find the addresses of the registration/deregistration functions in the
   // target process.
+  auto &TPC = ES.getTargetProcessControl();
+
   auto ProcessHandle = TPC.loadDylib(nullptr);
   if (!ProcessHandle)
     return ProcessHandle.takeError();
@@ -48,23 +52,23 @@ TPCEHFrameRegistrar::Create(TargetProcessControl &TPC) {
   auto RegisterEHFrameWrapperFnAddr = (*Result)[0][0];
   auto DeregisterEHFrameWrapperFnAddr = (*Result)[0][1];
 
-  return std::make_unique<TPCEHFrameRegistrar>(
-      TPC, RegisterEHFrameWrapperFnAddr, DeregisterEHFrameWrapperFnAddr);
+  return std::make_unique<TPCEHFrameRegistrar>(ES, RegisterEHFrameWrapperFnAddr,
+                                               DeregisterEHFrameWrapperFnAddr);
 }
 
 Error TPCEHFrameRegistrar::registerEHFrames(JITTargetAddress EHFrameSectionAddr,
                                             size_t EHFrameSectionSize) {
 
   return WrapperFunction<void(SPSTargetAddress, uint64_t)>::call(
-      TPCCaller(TPC, RegisterEHFrameWrapperFnAddr), EHFrameSectionAddr,
-      static_cast<uint64_t>(EHFrameSectionSize));
+      TPCCaller(ES.getTargetProcessControl(), RegisterEHFrameWrapperFnAddr),
+      EHFrameSectionAddr, static_cast<uint64_t>(EHFrameSectionSize));
 }
 
 Error TPCEHFrameRegistrar::deregisterEHFrames(
     JITTargetAddress EHFrameSectionAddr, size_t EHFrameSectionSize) {
   return WrapperFunction<void(SPSTargetAddress, uint64_t)>::call(
-      TPCCaller(TPC, DeregisterEHFrameWrapperFnAddr), EHFrameSectionAddr,
-      static_cast<uint64_t>(EHFrameSectionSize));
+      TPCCaller(ES.getTargetProcessControl(), DeregisterEHFrameWrapperFnAddr),
+      EHFrameSectionAddr, static_cast<uint64_t>(EHFrameSectionSize));
 }
 
 } // end namespace orc

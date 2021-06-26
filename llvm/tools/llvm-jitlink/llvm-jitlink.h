@@ -109,7 +109,6 @@ private:
 };
 
 struct Session {
-  std::unique_ptr<orc::TargetProcessControl> TPC;
   orc::ExecutionSession ES;
   orc::JITDylib *MainJD;
   LLVMJITLinkObjectLinkingLayer ObjLayer;

@@ -1759,8 +1759,8 @@ void MaterializationTask::printDescription(raw_ostream &OS) {
 
 void MaterializationTask::run() { MU->materialize(std::move(MR)); }
 
-ExecutionSession::ExecutionSession(std::shared_ptr<SymbolStringPool> SSP)
-    : SSP(SSP ? std::move(SSP) : std::make_shared<SymbolStringPool>()) {}
+ExecutionSession::ExecutionSession(std::unique_ptr<TargetProcessControl> TPC)
+    : TPC(std::move(TPC)) {}
 
 Error ExecutionSession::endSession() {
   LLVM_DEBUG(dbgs() << "Ending ExecutionSession " << this << "\n");

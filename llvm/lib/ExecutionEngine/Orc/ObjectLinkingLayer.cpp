@@ -567,6 +567,11 @@ char ObjectLinkingLayer::ID;
 
 using BaseT = RTTIExtends<ObjectLinkingLayer, ObjectLayer>;
 
+ObjectLinkingLayer::ObjectLinkingLayer(ExecutionSession &ES)
+    : BaseT(ES), MemMgr(ES.getTargetProcessControl().getMemMgr()) {
+  ES.registerResourceManager(*this);
+}
+
 ObjectLinkingLayer::ObjectLinkingLayer(ExecutionSession &ES,
                                        JITLinkMemoryManager &MemMgr)
     : BaseT(ES), MemMgr(MemMgr) {

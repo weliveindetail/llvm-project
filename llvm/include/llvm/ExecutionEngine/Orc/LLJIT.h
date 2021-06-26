@@ -260,6 +260,7 @@ public:
 
   using PlatformSetupFunction = std::function<Error(LLJIT &J)>;
 
+  std::unique_ptr<TargetProcessControl> TPC;
   std::unique_ptr<ExecutionSession> ES;
   Optional<JITTargetMachineBuilder> JTMB;
   Optional<DataLayout> DL;
@@ -267,7 +268,6 @@ public:
   CompileFunctionCreator CreateCompileFunction;
   PlatformSetupFunction SetUpPlatform;
   unsigned NumCompileThreads = 0;
-  TargetProcessControl *TPC = nullptr;
 
   /// Called prior to JIT class construcion to fix up defaults.
   Error prepareForConstruction();
@@ -276,7 +276,17 @@ public:
 template <typename JITType, typename SetterImpl, typename State>
 class LLJITBuilderSetters {
 public:
-
+  /// Set a TargetProcessControl for this instance.
+  /// This should not be called if ExecutionSession has already been set.
+  SetterImpl &
+  setTargetProcessControl(std::unique_ptr<TargetProcessControl> TPC) {
+    assert(
+        !impl().ES &&
+        "setTargetProcessControl should not be called if an ExecutionSession "
+        "has already been set");
+    impl().TPC = std::move(TPC);
+    return impl();
+  }
   /// Set an ExecutionSession for this instance.
   SetterImpl &setExecutionSession(std::unique_ptr<ExecutionSession> ES) {
     impl().ES = std::move(ES);
@@ -347,17 +357,6 @@ public:
   /// a zero argument.
   SetterImpl &setNumCompileThreads(unsigned NumCompileThreads) {
     impl().NumCompileThreads = NumCompileThreads;
-    return impl();
-  }
-
-  /// Set a TargetProcessControl object.
-  ///
-  /// If the platform uses ObjectLinkingLayer by default and no
-  /// ObjectLinkingLayerCreator has been set then the TargetProcessControl
-  /// object will be used to supply the memory manager for the
-  /// ObjectLinkingLayer.
-  SetterImpl &setTargetProcessControl(TargetProcessControl &TPC) {
-    impl().TPC = &TPC;
     return impl();
   }
 

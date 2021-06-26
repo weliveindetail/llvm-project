@@ -12,14 +12,14 @@ namespace llvm {
 namespace orc {
 
 Expected<std::unique_ptr<TPCDynamicLibrarySearchGenerator>>
-TPCDynamicLibrarySearchGenerator::Load(TargetProcessControl &TPC,
+TPCDynamicLibrarySearchGenerator::Load(ExecutionSession &ES,
                                        const char *LibraryPath,
                                        SymbolPredicate Allow) {
-  auto Handle = TPC.loadDylib(LibraryPath);
+  auto Handle = ES.getTargetProcessControl().loadDylib(LibraryPath);
   if (!Handle)
     return Handle.takeError();
 
-  return std::make_unique<TPCDynamicLibrarySearchGenerator>(TPC, *Handle,
+  return std::make_unique<TPCDynamicLibrarySearchGenerator>(ES, *Handle,
                                                             std::move(Allow));
 }
 
