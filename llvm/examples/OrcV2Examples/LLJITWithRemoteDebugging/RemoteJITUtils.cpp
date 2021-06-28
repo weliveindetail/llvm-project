@@ -14,6 +14,7 @@
 #include "llvm/ExecutionEngine/Orc/TPCDebugObjectRegistrar.h"
 #include "llvm/ExecutionEngine/Orc/TPCDynamicLibrarySearchGenerator.h"
 #include "llvm/ExecutionEngine/Orc/TargetProcess/JITLoaderGDB.h"
+#include "llvm/Support/Error.h"
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/Path.h"
 #include "llvm/Support/ToolOutputFile.h"
@@ -47,12 +48,12 @@ private:
 public:
   using BaseT::initializeORCRPCTPCBase;
 
-  RemoteTargetProcessControl(ExecutionSession &ES,
-                             std::unique_ptr<RPCChannel> Channel,
-                             std::unique_ptr<RPCEndpoint> Endpoint);
+  RemoteTargetProcessControl(std::unique_ptr<RPCChannel> Channel,
+                             std::unique_ptr<RPCEndpoint> Endpoint,
+                             BaseT::ErrorReporter ReportError);
+  ~RemoteTargetProcessControl();
 
   void initializeMemoryManagement();
-  Error disconnect() override;
 
 private:
   std::unique_ptr<RPCChannel> Channel;
@@ -61,13 +62,14 @@ private:
   std::unique_ptr<MemoryManager> OwnedMemMgr;
   std::atomic<bool> Finished{false};
   std::thread ListenerThread;
+
+  Error disconnect() override;
 };
 
 RemoteTargetProcessControl::RemoteTargetProcessControl(
-    ExecutionSession &ES, std::unique_ptr<RPCChannel> Channel,
-    std::unique_ptr<RPCEndpoint> Endpoint)
-    : BaseT(ES.getSymbolStringPool(), *Endpoint,
-            [&ES](Error Err) { ES.reportError(std::move(Err)); }),
+    std::unique_ptr<RPCChannel> Channel,
+    std::unique_ptr<RPCEndpoint> Endpoint, BaseT::ErrorReporter ReportError)
+    : BaseT(std::make_shared<SymbolStringPool>(), *Endpoint, std::move(ReportError)),
       Channel(std::move(Channel)), Endpoint(std::move(Endpoint)) {
 
   ListenerThread = std::thread([&]() {
@@ -78,6 +80,11 @@ RemoteTargetProcessControl::RemoteTargetProcessControl(
       }
     }
   });
+}
+
+RemoteTargetProcessControl::~RemoteTargetProcessControl() {
+  if (Error Err = disconnect())
+    reportError(std::move(Err));
 }
 
 void RemoteTargetProcessControl::initializeMemoryManagement() {
@@ -109,11 +116,17 @@ JITLinkExecutor::~JITLinkExecutor() = default;
 
 Expected<std::unique_ptr<ObjectLayer>>
 JITLinkExecutor::operator()(ExecutionSession &ES, const Triple &TT) {
-  return std::make_unique<ObjectLinkingLayer>(ES, TPC->getMemMgr());
+  return std::make_unique<ObjectLinkingLayer>(ES);
+}
+
+std::unique_ptr<ExecutionSession> JITLinkExecutor::startSession() {
+  auto ES = std::make_unique<ExecutionSession>(std::move(TPC));
+  this->ES = ES.get();
+  return ES;
 }
 
 Error JITLinkExecutor::addDebugSupport(ObjectLayer &ObjLayer) {
-  auto Registrar = createJITLoaderGDBRegistrar(*TPC);
+  auto Registrar = createJITLoaderGDBRegistrar(*ES);
   if (!Registrar)
     return Registrar.takeError();
 
@@ -126,18 +139,16 @@ Error JITLinkExecutor::addDebugSupport(ObjectLayer &ObjLayer) {
 
 Expected<std::unique_ptr<DefinitionGenerator>>
 JITLinkExecutor::loadDylib(StringRef RemotePath) {
-  if (auto Handle = TPC->loadDylib(RemotePath.data()))
-    return std::make_unique<TPCDynamicLibrarySearchGenerator>(*TPC, *Handle);
+  if (auto Handle = ES->getTargetProcessControl().loadDylib(RemotePath.data()))
+    return std::make_unique<TPCDynamicLibrarySearchGenerator>(*ES, *Handle);
   else
     return Handle.takeError();
 }
 
 Expected<int> JITLinkExecutor::runAsMain(JITEvaluatedSymbol MainSym,
                                          ArrayRef<std::string> Args) {
-  return TPC->runAsMain(MainSym.getAddress(), Args);
+  return ES->getTargetProcessControl().runAsMain(MainSym.getAddress(), Args);
 }
-
-Error JITLinkExecutor::disconnect() { return TPC->disconnect(); }
 
 static std::string defaultPath(const char *HostArgv0, StringRef ExecutorName) {
   // This just needs to be some symbol in the binary; C++ doesn't
@@ -197,7 +208,7 @@ JITLinkExecutor::ConnectTCPSocket(StringRef NetworkAddress,
 
 #else
 
-Error ChildProcessJITLinkExecutor::launch(ExecutionSession &ES) {
+Error ChildProcessJITLinkExecutor::launch(unique_function<void(Error)> ErrorReporter) {
   constexpr int ReadEnd = 0;
   constexpr int WriteEnd = 1;
 
@@ -252,11 +263,12 @@ Error ChildProcessJITLinkExecutor::launch(ExecutionSession &ES) {
   auto Endpoint =
       std::make_unique<RemoteTargetProcessControl::RPCEndpoint>(*Channel, true);
 
-  TPC = std::make_unique<RemoteTargetProcessControl>(ES, std::move(Channel),
-                                                     std::move(Endpoint));
+  TPC = std::make_unique<RemoteTargetProcessControl>(std::move(Channel),
+                                                     std::move(Endpoint),
+                                                     std::move(ErrorReporter));
 
   if (auto Err = TPC->initializeORCRPCTPCBase())
-    return joinErrors(std::move(Err), TPC->disconnect());
+    return Err;
 
   TPC->initializeMemoryManagement();
 
@@ -305,7 +317,7 @@ static Expected<int> connectTCPSocketImpl(std::string Host,
 
 Expected<std::unique_ptr<TCPSocketJITLinkExecutor>>
 JITLinkExecutor::ConnectTCPSocket(StringRef NetworkAddress,
-                                  ExecutionSession &ES) {
+                                  unique_function<void(Error)> ErrorReporter) {
   auto CreateErr = [NetworkAddress](StringRef Details) {
     return make_error<StringError>(
         formatv("Failed to connect TCP socket '{0}': {1}", NetworkAddress,
@@ -332,10 +344,10 @@ JITLinkExecutor::ConnectTCPSocket(StringRef NetworkAddress,
       std::make_unique<RemoteTargetProcessControl::RPCEndpoint>(*Channel, true);
 
   auto TPC = std::make_unique<RemoteTargetProcessControl>(
-      ES, std::move(Channel), std::move(Endpoint));
+      std::move(Channel), std::move(Endpoint), std::move(ErrorReporter));
 
   if (auto Err = TPC->initializeORCRPCTPCBase())
-    return joinErrors(std::move(Err), TPC->disconnect());
+    return std::move(Err);
 
   TPC->initializeMemoryManagement();
   shared::registerStringError<RPCChannel>();

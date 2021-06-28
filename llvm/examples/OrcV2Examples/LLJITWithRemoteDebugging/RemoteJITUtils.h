@@ -55,11 +55,14 @@ public:
   /// through a TCP socket. A valid NetworkAddress provides hostname and port,
   /// e.g. localhost:20000.
   static Expected<std::unique_ptr<TCPSocketJITLinkExecutor>>
-  ConnectTCPSocket(StringRef NetworkAddress, ExecutionSession &ES);
+  ConnectTCPSocket(StringRef NetworkAddress,
+                   unique_function<void(Error)> ErrorReporter);
 
   // Implement ObjectLinkingLayerCreator
   Expected<std::unique_ptr<ObjectLayer>> operator()(ExecutionSession &,
                                                     const Triple &);
+
+  std::unique_ptr<ExecutionSession> startSession();
 
   Error addDebugSupport(ObjectLayer &ObjLayer);
 
@@ -68,12 +71,12 @@ public:
 
   Expected<int> runAsMain(JITEvaluatedSymbol MainSym,
                           ArrayRef<std::string> Args);
-  Error disconnect();
 
   virtual ~JITLinkExecutor();
 
 protected:
   std::unique_ptr<RemoteTargetProcessControl> TPC;
+  ExecutionSession *ES;
 
   JITLinkExecutor();
 };
@@ -81,7 +84,7 @@ protected:
 /// JITLinkExecutor that runs in a child process on the local machine.
 class ChildProcessJITLinkExecutor : public JITLinkExecutor {
 public:
-  Error launch(ExecutionSession &ES);
+  Error launch(unique_function<void(Error)> ErrorReporter);
 
   pid_t getPID() const { return ProcessID; }
   StringRef getPath() const { return ExecutablePath; }
