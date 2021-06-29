@@ -207,7 +207,7 @@ int main(int argc, char *argv[]) {
   outs() << "Initializing LLJIT for remote executor\n";
   auto J = ExitOnErr(LLJITBuilder()
                           .setJITTargetMachineBuilder(std::move(JTMB))
-                          .setTargetProcessControl(std::make_unique<RemoteTargetProcessControl>(std::move(Channel), std::ref(ExitOnErr)))
+                          .setTargetProcessControl(ExitOnErr(createRemoteTargetProcessControl(std::move(Channel), std::ref(ExitOnErr))))
                           .setObjectLinkingLayerCreator([&](ExecutionSession &ES, const Triple &TT) {
                             return std::make_unique<ObjectLinkingLayer>(ES);
                           })

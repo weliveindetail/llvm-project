@@ -15,29 +15,57 @@
 #include "llvm/ExecutionEngine/Orc/TPCDebugObjectRegistrar.h"
 #include "llvm/ExecutionEngine/Orc/TPCDynamicLibrarySearchGenerator.h"
 #include "llvm/ExecutionEngine/Orc/TargetProcess/JITLoaderGDB.h"
-#include "llvm/Support/Error.h"
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/Path.h"
-#include "llvm/Support/ToolOutputFile.h"
 
 #ifdef LLVM_ON_UNIX
 #include <netdb.h>
 #include <netinet/in.h>
 #include <sys/socket.h>
 #include <unistd.h>
+#else
+#include <io.h>
 #endif // LLVM_ON_UNIX
-
-using namespace llvm;
-using namespace llvm::orc;
 
 namespace llvm {
 namespace orc {
 
+using ChannelT = shared::FDRawByteChannel;
+using EndpointT = shared::MultiThreadedRPCEndpoint<ChannelT>;
+
+class RemoteTargetProcessControl
+    : public OrcRPCTargetProcessControlBase<
+          shared::MultiThreadedRPCEndpoint<ChannelT>> {
+private:
+  using ThisT = RemoteTargetProcessControl;
+  using BaseT = OrcRPCTargetProcessControlBase<EndpointT>;
+  using MemoryAccessT = OrcRPCTPCMemoryAccess<ThisT>;
+  using MemoryManagerT = OrcRPCTPCJITLinkMemoryManager<ThisT>;
+
+public:
+  RemoteTargetProcessControl(std::unique_ptr<ChannelT> Channel, std::unique_ptr<EndpointT> Endpoint,
+                             ErrorReporter ReportError);
+  ~RemoteTargetProcessControl();
+
+  using BaseT::initializeORCRPCTPCBase;
+  void initializeMemoryManagement();
+
+private:
+  std::unique_ptr<ChannelT> Channel;
+  std::unique_ptr<EndpointT> Endpoint;
+  std::unique_ptr<MemoryAccessT> OwnedMemAccess;
+  std::unique_ptr<MemoryManagerT> OwnedMemMgr;
+  std::atomic<bool> Finished{false};
+  std::thread ListenerThread;
+
+  Error disconnect() override;
+};
+
 RemoteTargetProcessControl::RemoteTargetProcessControl(
-    std::unique_ptr<ChannelT> Channel, ErrorReporter ReportError)
-    : BaseT(std::make_shared<SymbolStringPool>(), std::move(ReportError)),
-      Channel(std::move(Channel)), Endpoint(std::make_unique<EndpointT>(*this->Channel, true)) {
-  setEndpoint(*this->Endpoint);
+    std::unique_ptr<ChannelT> Channel, std::unique_ptr<EndpointT> Endpoint,
+    ErrorReporter ReportError)
+    : BaseT(std::make_shared<SymbolStringPool>(), *Endpoint, std::move(ReportError)),
+      Channel(std::move(Channel)), Endpoint(std::move(Endpoint)) {
 
   ListenerThread = std::thread([&]() {
     while (!Finished) {
@@ -47,14 +75,6 @@ RemoteTargetProcessControl::RemoteTargetProcessControl(
       }
     }
   });
-
-  if (auto Err = initializeORCRPCTPCBase()) {
-    reportError(std::move(Err));
-    return;
-  }
-
-  initializeMemoryManagement();
-  shared::registerStringError<ChannelT>();
 }
 
 RemoteTargetProcessControl::~RemoteTargetProcessControl() {
@@ -81,6 +101,20 @@ Error RemoteTargetProcessControl::disconnect() {
   });
   ListenerThread.join();
   return joinErrors(std::move(Err), F.get());
+}
+
+Expected<std::unique_ptr<TargetProcessControl>>
+createRemoteTargetProcessControl(std::unique_ptr<shared::FDRawByteChannel> Channel,
+                                 unique_function<void(Error)> ReportError) {
+  auto EP = std::make_unique<EndpointT>(*Channel, true);
+  auto TPC = std::make_unique<RemoteTargetProcessControl>(std::move(Channel), std::move(EP), std::move(ReportError));
+
+  if (auto Err = TPC->initializeORCRPCTPCBase())
+    return std::move(Err);
+
+  TPC->initializeMemoryManagement();
+  shared::registerStringError<ChannelT>();
+  return std::move(TPC);
 }
 
 Error addDebugSupport(ObjectLayer &ObjLayer) {
@@ -121,17 +155,15 @@ std::string findLocalExecutor(const char *HostArgv0) {
 
 #ifndef LLVM_ON_UNIX
 
-// FIXME: Add support for Windows.
-Error ChildProcessJITLinkExecutor::launch(ExecutionSession &ES) {
+Expected<std::pair<std::unique_ptr<shared::FDRawByteChannel>, uint32_t>>
+launchLocalExecutor(StringRef ExecutablePath) {
   return make_error<StringError>(
       "Remote JITing not yet supported on non-unix platforms",
       inconvertibleErrorCode());
 }
 
-// FIXME: Add support for Windows.
-Expected<std::unique_ptr<TCPSocketJITLinkExecutor>>
-JITLinkExecutor::ConnectTCPSocket(StringRef NetworkAddress,
-                                  ExecutionSession &ES) {
+Expected<std::unique_ptr<shared::FDRawByteChannel>>
+connectTCPSocket(StringRef NetworkAddress) {
   return make_error<StringError>(
       "Remote JITing not yet supported on non-unix platforms",
       inconvertibleErrorCode());
@@ -139,7 +171,7 @@ JITLinkExecutor::ConnectTCPSocket(StringRef NetworkAddress,
 
 #else
 
-Expected<std::pair<std::unique_ptr<shared::FDRawByteChannel>, pid_t>>
+Expected<std::pair<std::unique_ptr<shared::FDRawByteChannel>, uint32_t>>
 launchLocalExecutor(StringRef ExecutablePath) {
   constexpr int ReadEnd = 0;
   constexpr int WriteEnd = 1;
@@ -196,7 +228,7 @@ launchLocalExecutor(StringRef ExecutablePath) {
   close(FromExecutor[WriteEnd]);
 
   return std::make_pair(std::make_unique<shared::FDRawByteChannel>(FromExecutor[ReadEnd], ToExecutor[WriteEnd]),
-    ProcessID);
+    static_cast<uint32_t>(ProcessID));
 }
 
 static Expected<int> connectTCPSocketImpl(std::string Host,
@@ -238,13 +270,6 @@ static Expected<int> connectTCPSocketImpl(std::string Host,
   return SockFD;
 }
 
-static void disconnectTCPSocket(int InFD, int OutFD) {
-  shutdown(OutFD, SHUT_WR);
-  shutdown(InFD, SHUT_RD);
-  close(OutFD);
-  close(InFD);
-}
-
 Expected<std::unique_ptr<shared::FDRawByteChannel>>
 connectTCPSocket(StringRef NetworkAddress) {
   auto CreateErr = [NetworkAddress](StringRef Details) {
@@ -268,8 +293,7 @@ connectTCPSocket(StringRef NetworkAddress) {
   if (!SockFD)
     return CreateErr(toString(SockFD.takeError()));
 
-  return std::make_unique<shared::FDRawByteChannel>(*SockFD, *SockFD,
-                                                    &disconnectTCPSocket);
+  return std::make_unique<shared::FDRawByteChannel>(*SockFD, *SockFD);
 }
 
 } // namespace orc
