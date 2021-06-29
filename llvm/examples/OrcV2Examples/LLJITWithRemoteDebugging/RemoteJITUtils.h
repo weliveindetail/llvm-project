@@ -19,8 +19,10 @@
 #include "llvm/ExecutionEngine/JITSymbol.h"
 #include "llvm/ExecutionEngine/Orc/Core.h"
 #include "llvm/ExecutionEngine/Orc/Layer.h"
+#include "llvm/ExecutionEngine/Orc/OrcRPCTargetProcessControl.h"
 #include "llvm/ExecutionEngine/Orc/ObjectTransformLayer.h"
 #include "llvm/ExecutionEngine/Orc/Shared/FDRawByteChannel.h"
+#include "llvm/ExecutionEngine/Orc/Shared/RPCUtils.h"
 #include "llvm/Support/Error.h"
 
 #include <memory>
@@ -35,77 +37,53 @@
 namespace llvm {
 namespace orc {
 
-class ChildProcessJITLinkExecutor;
-class RemoteTargetProcessControl;
-class TCPSocketJITLinkExecutor;
+using ChannelT = shared::FDRawByteChannel;
+using EndpointT = shared::MultiThreadedRPCEndpoint<ChannelT>;
 
-class JITLinkExecutor {
+/// Find the default exectuable on disk and create a JITLinkExecutor for it.
+std::string findLocalExecutor(const char *HostArgv0);
+
+Expected<std::pair<std::unique_ptr<ChannelT>, pid_t>>
+launchLocalExecutor(StringRef ExecutablePath);
+
+/// Create a JITLinkExecutor that connects to the given network address
+/// through a TCP socket. A valid NetworkAddress provides hostname and port,
+/// e.g. localhost:20000.
+Expected<std::unique_ptr<ChannelT>>
+connectTCPSocket(StringRef NetworkAddress);
+
+Error addDebugSupport(ObjectLayer &ObjLayer);
+
+Expected<std::unique_ptr<DefinitionGenerator>>
+loadDylib(ExecutionSession &ES, StringRef RemotePath);
+
+using ErrorReporterT = unique_function<void(Error)>;
+
+class RemoteTargetProcessControl
+    : public OrcRPCTargetProcessControlBase<
+          shared::MultiThreadedRPCEndpoint<ChannelT>> {
+private:
+  using ThisT = RemoteTargetProcessControl;
+  using BaseT = OrcRPCTargetProcessControlBase<EndpointT>;
+  using MemoryAccessT = OrcRPCTPCMemoryAccess<ThisT>;
+  using MemoryManagerT = OrcRPCTPCJITLinkMemoryManager<ThisT>;
+
 public:
-  using RPCChannel = shared::FDRawByteChannel;
+  RemoteTargetProcessControl(std::unique_ptr<ChannelT> Channel,
+                             ErrorReporter ReportError);
+  ~RemoteTargetProcessControl();
 
-  /// Create a JITLinkExecutor for the given exectuable on disk.
-  static Expected<std::unique_ptr<ChildProcessJITLinkExecutor>>
-  CreateLocal(std::string ExecutablePath);
-
-  /// Find the default exectuable on disk and create a JITLinkExecutor for it.
-  static Expected<std::unique_ptr<ChildProcessJITLinkExecutor>>
-  FindLocal(const char *JITArgv0);
-
-  /// Create a JITLinkExecutor that connects to the given network address
-  /// through a TCP socket. A valid NetworkAddress provides hostname and port,
-  /// e.g. localhost:20000.
-  static Expected<std::unique_ptr<TCPSocketJITLinkExecutor>>
-  ConnectTCPSocket(StringRef NetworkAddress,
-                   unique_function<void(Error)> ErrorReporter);
-
-  // Implement ObjectLinkingLayerCreator
-  Expected<std::unique_ptr<ObjectLayer>> operator()(ExecutionSession &,
-                                                    const Triple &);
-
-  std::unique_ptr<ExecutionSession> startSession();
-
-  Error addDebugSupport(ObjectLayer &ObjLayer);
-
-  Expected<std::unique_ptr<DefinitionGenerator>>
-  loadDylib(StringRef RemotePath);
-
-  Expected<int> runAsMain(JITEvaluatedSymbol MainSym,
-                          ArrayRef<std::string> Args);
-
-  virtual ~JITLinkExecutor();
-
-protected:
-  std::unique_ptr<RemoteTargetProcessControl> TPC;
-  ExecutionSession *ES;
-
-  JITLinkExecutor();
-};
-
-/// JITLinkExecutor that runs in a child process on the local machine.
-class ChildProcessJITLinkExecutor : public JITLinkExecutor {
-public:
-  Error launch(unique_function<void(Error)> ErrorReporter);
-
-  pid_t getPID() const { return ProcessID; }
-  StringRef getPath() const { return ExecutablePath; }
+  void initializeMemoryManagement();
 
 private:
-  std::string ExecutablePath;
-  pid_t ProcessID;
+  std::unique_ptr<ChannelT> Channel;
+  std::unique_ptr<EndpointT> Endpoint;
+  std::unique_ptr<MemoryAccessT> OwnedMemAccess;
+  std::unique_ptr<MemoryManagerT> OwnedMemMgr;
+  std::atomic<bool> Finished{false};
+  std::thread ListenerThread;
 
-  ChildProcessJITLinkExecutor(std::string ExecutablePath)
-      : ExecutablePath(std::move(ExecutablePath)) {}
-
-  static std::string defaultPath(const char *HostArgv0, StringRef ExecutorName);
-  friend class JITLinkExecutor;
-};
-
-/// JITLinkExecutor connected through a TCP socket.
-class TCPSocketJITLinkExecutor : public JITLinkExecutor {
-private:
-  TCPSocketJITLinkExecutor(std::unique_ptr<RemoteTargetProcessControl> TPC);
-
-  friend class JITLinkExecutor;
+  Error disconnect() override;
 };
 
 } // namespace orc
