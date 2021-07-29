@@ -77,9 +77,14 @@
 //
 //===----------------------------------------------------------------------===//
 
+#include "llvm/ExecutionEngine/Orc/Core.h"
+#include "llvm/ExecutionEngine/Orc/DebugObjectManagerPlugin.h"
+#include "llvm/ExecutionEngine/Orc/EPCDebugObjectRegistrar.h"
+#include "llvm/ExecutionEngine/Orc/EPCDynamicLibrarySearchGenerator.h"
 #include "llvm/ExecutionEngine/Orc/JITTargetMachineBuilder.h"
 #include "llvm/ExecutionEngine/Orc/LLJIT.h"
 #include "llvm/ExecutionEngine/Orc/ThreadSafeModule.h"
+#include "llvm/ExecutionEngine/Orc/TargetProcess/JITLoaderGDB.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Error.h"
 #include "llvm/Support/FormatVariadic.h"
@@ -131,14 +136,20 @@ static cl::opt<bool>
                     cl::desc("Wait for user input before entering JITed code"),
                     cl::init(false));
 
+LLVM_ATTRIBUTE_USED void linkComponents() {
+  // The debug plugin assumes this function to exist in the executor process.
+  errs() << (void *)&llvm_orc_registerJITLoaderGDBWrapper;
+}
+
 ExitOnError ExitOnErr;
 
-static std::unique_ptr<JITLinkExecutor> connectExecutor(const char *Argv0) {
-  // Connect to a running out-of-process executor through a TCP socket.
+static std::unique_ptr<ExecutorProcessControl>
+createExecutor(const char *Argv0) {
+  std::unique_ptr<ExecutorProcessControl> EPC;
+
   if (!OOPExecutorConnect.empty()) {
-    std::unique_ptr<TCPSocketJITLinkExecutor> Exec =
-        ExitOnErr(JITLinkExecutor::ConnectTCPSocket(OOPExecutorConnect,
-                                                    std::ref(ExitOnErr)));
+    // Connect to a running out-of-process executor through a TCP socket.
+    EPC = ExitOnErr(connectTCPSocket(OOPExecutorConnect, std::ref(ExitOnErr)));
 
     outs() << "Connected to executor at " << OOPExecutorConnect << "\n";
     if (WaitForDebugger) {
@@ -146,26 +157,30 @@ static std::unique_ptr<JITLinkExecutor> connectExecutor(const char *Argv0) {
       fflush(stdin);
       getchar();
     }
+  } else {
+    // Launch an out-of-process executor locally in a child process.
+    std::string LocalExecPath = ExitOnErr(getLocalExecutor(OOPExecutor, Argv0));
+    outs() << "Found out-of-process executor: " << LocalExecPath << "\n";
 
-    return std::move(Exec);
+    int ProcessID;
+    EPC = ExitOnErr(
+        launchSubprocess(LocalExecPath, std::ref(ExitOnErr), ProcessID));
+
+    if (WaitForDebugger) {
+      outs() << "Launched executor in subprocess: " << ProcessID << "\n"
+             << "Attach a debugger and press any key to continue.\n";
+      fflush(stdin);
+      getchar();
+    }
   }
 
-  // Launch a out-of-process executor locally in a child process.
-  std::unique_ptr<ChildProcessJITLinkExecutor> Exec = ExitOnErr(
-      OOPExecutor.empty() ? JITLinkExecutor::FindLocal(Argv0)
-                          : JITLinkExecutor::CreateLocal(OOPExecutor));
+  return EPC;
+}
 
-  outs() << "Found out-of-process executor: " << Exec->getPath() << "\n";
-
-  ExitOnErr(Exec->launch(std::ref(ExitOnErr)));
-  if (WaitForDebugger) {
-    outs() << "Launched executor in subprocess: " << Exec->getPID() << "\n"
-           << "Attach a debugger and press any key to continue.\n";
-    fflush(stdin);
-    getchar();
-  }
-
-  return std::move(Exec);
+Expected<std::unique_ptr<ObjectLayer>>
+createObjLinkingLayer(ExecutionSession &ES, const Triple &TT) {
+  auto &EPC = ES.getExecutorProcessControl();
+  return std::make_unique<ObjectLinkingLayer>(ES, EPC.getMemMgr());
 }
 
 int main(int argc, char *argv[]) {
@@ -176,9 +191,6 @@ int main(int argc, char *argv[]) {
 
   ExitOnErr.setBanner(std::string(argv[0]) + ": ");
   cl::ParseCommandLineOptions(argc, argv, "LLJITWithRemoteDebugging");
-
-  // Launch/connect the out-of-process executor.
-  std::unique_ptr<JITLinkExecutor> Executor = connectExecutor(argv[0]);
 
   // Load the given IR files.
   std::vector<ThreadSafeModule> TSMs;
@@ -195,15 +207,14 @@ int main(int argc, char *argv[]) {
   });
 
   for (const ThreadSafeModule &TSM : TSMs)
-    ExitOnErr(TSM.withModuleDo([TT, MainModuleName](Module &M) -> Error {
+    TSM.withModuleDo([TT, MainModuleName](Module &M) {
       if (M.getTargetTriple() != TT)
-        return make_error<StringError>(
+        ExitOnErr(make_error<StringError>(
             formatv("Different target triples in input files:\n"
                     "  '{0}' in '{1}'\n  '{2}' in '{3}'",
                     TT, MainModuleName, M.getTargetTriple(), M.getName()),
-            inconvertibleErrorCode());
-      return Error::success();
-    }));
+            inconvertibleErrorCode()));
+    });
 
   // Create a target machine that matches the input triple.
   JITTargetMachineBuilder JTMB((Triple(TT)));
@@ -212,24 +223,31 @@ int main(int argc, char *argv[]) {
 
   // Create LLJIT and destroy it before disconnecting the target process.
   {
-    std::unique_ptr<ExecutionSession> ES = Executor->startSession();
-
     outs() << "Initializing LLJIT for remote executor\n";
     auto J = ExitOnErr(LLJITBuilder()
-                           .setExecutionSession(std::move(ES))
                            .setJITTargetMachineBuilder(std::move(JTMB))
-                           .setObjectLinkingLayerCreator(std::ref(*Executor))
+                           .setExecutorProcessControl(createExecutor(argv[0]))
+                           .setObjectLinkingLayerCreator(&createObjLinkingLayer)
                            .create());
 
-    // Add plugin for debug support.
-    ExitOnErr(Executor->addDebugSupport(J->getObjLinkingLayer()));
+    ExecutionSession &ES = J->getExecutionSession();
+    ExecutorProcessControl &EPC = ES.getExecutorProcessControl();
+
+    // Add ObjectLinkingLayer plugin for debug support.
+    auto Registrar = ExitOnErr(createJITLoaderGDBRegistrar(ES));
+    auto *ObjLayer = cast<ObjectLinkingLayer>(&J->getObjLinkingLayer());
+    ObjLayer->addPlugin(
+        std::make_unique<DebugObjectManagerPlugin>(ES, std::move(Registrar)));
 
     // Load required shared libraries on the remote target and add a generator
     // for each of it, so the compiler can lookup their symbols.
-    for (const std::string &Path : Dylibs)
-      J->getMainJITDylib().addGenerator(ExitOnErr(Executor->loadDylib(Path)));
+    for (const std::string &RemotePath : Dylibs) {
+      auto Handle = ExitOnErr(EPC.loadDylib(RemotePath.data()));
+      J->getMainJITDylib().addGenerator(
+          std::make_unique<EPCDynamicLibrarySearchGenerator>(ES, Handle));
+    }
 
-    // Add the loaded IR module to the JIT. This will set up symbol tables and
+    // Add the loaded IR modules to the JIT. This will set up symbol tables and
     // prepare for materialization.
     for (ThreadSafeModule &TSM : TSMs)
       ExitOnErr(J->addIRModule(std::move(TSM)));
@@ -248,7 +266,7 @@ int main(int argc, char *argv[]) {
     // Execute the code in the remote target process and dump the result. With
     // the debugger attached to the target, it should be possible to inspect the
     // JITed code as if it was compiled statically.
-    int Result = ExitOnErr(Executor->runAsMain(MainFn, InputArgv));
+    int Result = ExitOnErr(EPC.runAsMain(MainFn.getAddress(), InputArgv));
     outs() << "Exit code: " << Result << "\n";
   }
 
