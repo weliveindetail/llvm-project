@@ -365,6 +365,7 @@ if( CMAKE_SIZEOF_VOID_P EQUAL 8 AND NOT WIN32 )
     # FIXME: CMAKE_SIZEOF_VOID_P is still 8
     add_definitions(-D_LARGEFILE_SOURCE)
     add_definitions(-D_FILE_OFFSET_BITS=64)
+    add_definitions(-DLLVM_BUILD_32_BITS)
   endif( LLVM_BUILD_32_BITS )
 endif( CMAKE_SIZEOF_VOID_P EQUAL 8 AND NOT WIN32 )
 
