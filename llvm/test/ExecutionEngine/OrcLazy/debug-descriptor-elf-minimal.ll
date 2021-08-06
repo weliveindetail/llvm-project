@@ -1,3 +1,6 @@
+# REQUIRES: x86-registered-target
+# REQUIRES: 64bit-process
+
 ; RUN: lli --jit-kind=orc-lazy --per-module-lazy --jit-linker=rtdyld \
 ; RUN:     --generate=__dump_jit_debug_descriptor %s | FileCheck %s
 ;
