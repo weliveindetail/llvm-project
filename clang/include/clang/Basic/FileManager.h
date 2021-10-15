@@ -31,6 +31,7 @@
 #include <ctime>
 #include <map>
 #include <memory>
+#include <set>
 #include <string>
 
 namespace llvm {
@@ -101,6 +102,8 @@ class FileManager : public RefCountedBase<FileManager> {
 
   /// The file entry for stdin, if it has been accessed through the FileManager.
   Optional<FileEntryRef> STDIN;
+
+  std::set<FileEntryRef> FileEntriesToReread;
 
   /// The canonical names of files and directories .
   llvm::DenseMap<const void *, llvm::StringRef> CanonicalNames;

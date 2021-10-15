@@ -204,10 +204,29 @@ llvm::Expected<FileEntryRef>
 FileManager::getFileRef(StringRef Filename, bool openFile, bool CacheFailure) {
   ++NumFileLookups;
 
-  // See if there is already an entry in the map.
   auto SeenFileInsertResult =
       SeenFileEntries.insert({Filename, std::errc::no_such_file_or_directory});
-  if (!SeenFileInsertResult.second) {
+
+  auto *NamedFileEnt = &*SeenFileInsertResult.first;
+
+  const FileEntry *StaleFileEntry = nullptr;
+  bool needsRereading = false;
+  if (NamedFileEnt->getValue()) {
+    FileEntryRef::MapValue Value = *NamedFileEnt->second;
+    assert(Value.V.is<FileEntry *>() && "TODO: Can we handle redirects?");
+    std::set<FileEntryRef>::const_iterator found =
+        FileEntriesToReread.find(FileEntryRef(*NamedFileEnt));
+    if (found != FileEntriesToReread.end()) {
+      needsRereading = true;
+      StaleFileEntry = &FileEntryRef(*NamedFileEnt).getFileEntry();
+      FileEntriesToReread.erase(found);
+      // Avoid the assert below.
+      NamedFileEnt->second->V.getFromOpaqueValue(nullptr);
+    }
+  }
+
+  // See if there is already an entry in the map.
+  if (!SeenFileInsertResult.second && !needsRereading) {
     if (!SeenFileInsertResult.first->second)
       return llvm::errorCodeToError(
           SeenFileInsertResult.first->second.getError());
@@ -222,7 +241,6 @@ FileManager::getFileRef(StringRef Filename, bool openFile, bool CacheFailure) {
 
   // We've not seen this before. Fill it in.
   ++NumFileCacheMisses;
-  auto *NamedFileEnt = &*SeenFileInsertResult.first;
   assert(!NamedFileEnt->second && "should be newly-created");
 
   // Get the null-terminated file name as stored as the key of the
@@ -334,6 +352,13 @@ FileManager::getFileRef(StringRef Filename, bool openFile, bool CacheFailure) {
   } else if (!openFile) {
     // We should still fill the path even if we aren't opening the file.
     fillRealPathName(&UFE, InterndFileName);
+  }
+
+  if (StaleFileEntry) {
+    // Find occurrences of old FileEntry; update with new one:
+    for (auto &EntryOrErr : SeenFileEntries)
+      if (EntryOrErr.second->V.getOpaqueValue() == StaleFileEntry)
+        EntryOrErr.second->V = &UFE;
   }
   return ReturnedRef;
 }
@@ -582,16 +607,7 @@ FileManager::getNoncachedStatValue(StringRef Path,
 
 void FileManager::invalidateCache(const FileEntry *Entry) {
   assert(Entry && "Cannot invalidate a NULL FileEntry");
-
-  SeenFileEntries.erase(Entry->getName());
-
-  // FileEntry invalidation should not block future optimizations in the file
-  // caches. Possible alternatives are cache truncation (invalidate last N) or
-  // invalidation of the whole cache.
-  //
-  // FIXME: This is broken. We sometimes have the same FileEntry* shared
-  // between multiple SeenFileEntries, so this can leave dangling pointers.
-  UniqueRealFiles.erase(Entry->getUniqueID());
+  FileEntriesToReread.insert(Entry);
 }
 
 void FileManager::GetUniqueIDMapping(
