@@ -29,6 +29,7 @@
 #include <ctime>
 #include <map>
 #include <memory>
+#include <set>
 #include <string>
 
 namespace llvm {
@@ -222,6 +223,8 @@ class FileManager : public RefCountedBase<FileManager> {
   llvm::StringMap<llvm::ErrorOr<SeenFileEntryOrRedirect>,
                   llvm::BumpPtrAllocator>
       SeenFileEntries;
+
+  std::set<const FileEntry *> FileEntriesToReread;
 
   /// The canonical names of files and directories .
   llvm::DenseMap<const void *, llvm::StringRef> CanonicalNames;

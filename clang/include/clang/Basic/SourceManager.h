@@ -766,6 +766,8 @@ public:
 
   void clearIDTables();
 
+  void invalidateCache(const FileEntry *Entry);
+
   /// Initialize this source manager suitably to replay the compilation
   /// described by \p Old. Requires that \p Old outlive \p *this.
   void initializeForReplay(const SourceManager &Old);
