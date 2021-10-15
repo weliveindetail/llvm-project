@@ -24,6 +24,9 @@
 # Ignore the user specified CMake presets in subproject directories.
 /*/CMakeUserPresets.json
 
+.cache
+llvm/tools/cling
+
 # Nested build directory
 /build*
 
