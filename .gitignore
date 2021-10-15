@@ -21,6 +21,9 @@
 #OS X specific files.
 .DS_store
 
+.cache
+llvm/tools/cling
+
 # Nested build directory
 /build*
 
