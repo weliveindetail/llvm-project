@@ -130,6 +130,7 @@ protected:
   /// Construct an empty expression.
   explicit Expr(StmtClass SC, EmptyShell) : ValueStmt(SC) { }
 
+public:
   /// Each concrete expr subclass is expected to compute its dependence and call
   /// this in the constructor.
   void setDependence(ExprDependence Deps) {
@@ -138,7 +139,6 @@ protected:
   friend class ASTImporter; // Sets dependence dircetly.
   friend class ASTStmtReader; // Sets dependence dircetly.
 
-public:
   QualType getType() const { return TR; }
   void setType(QualType t) {
     // In C++, the type of an expression is always adjusted so that it
