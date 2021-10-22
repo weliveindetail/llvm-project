@@ -152,6 +152,12 @@ public:
   /// Returns the context for this ThreadSafeModule.
   ThreadSafeContext getContext() const { return TSCtx; }
 
+  /// Hands back ownership for the contained module.
+  std::unique_ptr<Module> takeModule() {
+    auto Lock = TSCtx.getLock();
+    return std::move(M);
+  }
+
 private:
   std::unique_ptr<Module> M;
   ThreadSafeContext TSCtx;
