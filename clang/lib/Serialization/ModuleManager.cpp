@@ -235,8 +235,10 @@ ModuleManager::addModule(StringRef FileName, ModuleKind Type,
                                           ExpectedSignature, ErrorStr)) {
     // Try to remove the buffer.  If it can't be removed, then it was already
     // validated by this process.
-    if (!getModuleCache().tryToDropPCM(NewModule->FileName))
-      FileMgr.invalidateCache(const_cast<FileEntry*>(NewModule->File));
+    if (!getModuleCache().tryToDropPCM(NewModule->FileName)) {
+      assert(NewModule->File && "Assume valid file ref");
+      FileMgr.invalidateCache(*NewModule->File);
+    }
     return OutOfDate;
   }
 
@@ -290,7 +292,8 @@ void ModuleManager::removeModules(ModuleIterator First, ModuleMap *modMap) {
   for (ModuleIterator victim = First; victim != Last; ++victim) {
     Modules.erase(victim->File);
 
-    FileMgr.invalidateCache(const_cast<FileEntry*>(victim->File));
+    assert(victim->File && "Assume valid file ref");
+    FileMgr.invalidateCache(*victim->File);
     if (modMap) {
       StringRef ModuleName = victim->ModuleName;
       if (Module *mod = modMap->findModule(ModuleName)) {

@@ -374,7 +374,7 @@ void SourceManager::invalidateCache(FileID FID) {
       CC->replaceBuffer(0, /*free*/true);
     }
   }
-  getFileManager().invalidateCache(const_cast<FileEntry*>(Entry));
+  getFileManager().invalidateCache(Entry->getLastRef());
 }
 
 void SourceManager::initializeForReplay(const SourceManager &Old) {
