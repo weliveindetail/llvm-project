@@ -256,6 +256,11 @@ public:
       setBuffer(llvm::MemoryBuffer::getMemBuffer(*B));
   }
 
+  void resetBuffer() {
+    IsBufferInvalid = true;
+    Buffer.reset();
+  }
+
   // If BufStr has an invalid BOM, returns the BOM name; otherwise, returns
   // nullptr
   static const char *getInvalidBOM(StringRef BufStr);

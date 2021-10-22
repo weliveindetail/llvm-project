@@ -363,15 +363,15 @@ void SourceManager::invalidateCache(FileID FID) {
   if (!Entry)
     return;
   if (ContentCache *&E = FileInfos[Entry]) {
-    E->replaceBuffer(0, /*free*/ true);
+    E->resetBuffer();
     E = 0;
   }
   if (!FID.isInvalid()) {
     const SrcMgr::SLocEntry& SLocE = getSLocEntry(FID);
     if (SLocE.isFile()) {
-      SrcMgr::ContentCache* CC =
-        const_cast<SrcMgr::ContentCache*>(SLocE.getFile().getContentCache());
-      CC->replaceBuffer(0, /*free*/true);
+      SrcMgr::ContentCache &CC =
+          const_cast<SrcMgr::ContentCache &>(SLocE.getFile().getContentCache());
+      CC.resetBuffer();
     }
   }
   getFileManager().invalidateCache(Entry->getLastRef());
@@ -1391,8 +1391,10 @@ unsigned SourceManager::getLineNumber(FileID FID, unsigned FilePos,
   if (!Content->SourceLineCache) {
 
     llvm::Optional<llvm::MemoryBufferRef> Buffer;
-    if (isFileOverridden(FI->ContentsEntry))
-      Buffer = getMemoryBufferForFileOrNone(FI->ContentsEntry);
+    if (isFileOverridden(Content->ContentsEntry))
+      Buffer =
+          const_cast<SourceManager *>(this)->getMemoryBufferForFileOrNone(
+              Content->ContentsEntry);
     else
       Buffer =
           Content->getBufferOrNone(Diag, getFileManager(), SourceLocation());
