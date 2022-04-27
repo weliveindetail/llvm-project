@@ -1016,7 +1016,7 @@ void EmitAssemblyHelper::EmitAssembly(BackendAction Action,
   cl::PrintOptionValues();
 
   std::unique_ptr<llvm::ToolOutputFile> ThinLinkOS, DwoOS;
-  RunOptimizationPipeline(Action, OS, ThinLinkOS);
+  //RunOptimizationPipeline(Action, OS, ThinLinkOS);
   RunCodegenPipeline(Action, OS, DwoOS);
 
   if (ThinLinkOS)
