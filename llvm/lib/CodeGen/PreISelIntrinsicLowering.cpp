@@ -120,6 +120,10 @@ static bool lowerObjCCall(Function &F, const char *NewFn,
     CallInst::TailCallKind TCK = CI->getTailCallKind();
     NewCI->setTailCallKind(std::max(TCK, OverridingTCK));
 
+    if (CB->hasFnAttr(Attribute::NoUnwind))
+      assert(CI->hasFnAttr(Attribute::NoUnwind) &&
+             "Lowered call sites reatin NoUnwind attribute");
+
     if (!CI->use_empty())
       CI->replaceAllUsesWith(NewCI);
     CI->eraseFromParent();
