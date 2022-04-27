@@ -955,23 +955,46 @@ void WinEHPrepare::removeImplausibleInstructions(Function &F) {
 
     for (BasicBlock *BB : BlocksInFunclet) {
       for (Instruction &I : *BB) {
+        I.dump();
+
         auto *CB = dyn_cast<CallBase>(&I);
-        if (!CB)
+        if (!CB) {
+          dbgs() << "Skip: No CallBase\n";
           continue;
+        }
 
         Value *FuncletBundleOperand = nullptr;
         if (auto BU = CB->getOperandBundle(LLVMContext::OB_funclet))
           FuncletBundleOperand = BU->Inputs.front();
 
-        if (FuncletBundleOperand == FuncletPad)
+        if (FuncletBundleOperand == FuncletPad) {
+          dbgs() << "Skip: FuncletBundleOperand == FuncletPad\n";
           continue;
+        }
 
         // Skip call sites which are nounwind intrinsics or inline asm.
         auto *CalledFn =
             dyn_cast<Function>(CB->getCalledOperand()->stripPointerCasts());
-        if (CalledFn && ((CalledFn->isIntrinsic() && CB->doesNotThrow()) ||
-                         CB->isInlineAsm()))
-          continue;
+        if (CalledFn) {
+          if (CalledFn->isIntrinsic() && CB->doesNotThrow()) {
+            LLVM_DEBUG(dbgs() << "Skip: nounwind intrinsic\n");
+            continue;
+          }
+          LLVM_DEBUG({
+            if (CalledFn->doesNotThrow())
+              dbgs() << "CalledFn->doesNotThrow()\n";
+            if (CalledFn->hasFnAttribute(Attribute::NonLazyBind))
+              dbgs() << "CalledFn->hasFnAttribute(Attribute::NonLazyBind)\n";
+            if (CB->doesNotThrow())
+              dbgs() << "CB->doesNotThrow()\n";
+            if (CB->hasFnAttr(Attribute::NonLazyBind))
+              dbgs() << "CB->hasFnAttr(Attribute::NonLazyBind)\n";
+          });
+          if (CB->isInlineAsm()) {
+            LLVM_DEBUG(dbgs() << "Skip: inline asm\n");
+            continue;
+          }
+        }
 
         // This call site was not part of this funclet, remove it.
         if (isa<InvokeInst>(CB)) {
@@ -983,6 +1006,7 @@ void WinEHPrepare::removeImplausibleInstructions(Function &F) {
           auto *CI = cast<CallInst>(&*CallI);
           changeToUnreachable(CI);
         } else {
+          LLVM_DEBUG(dbgs() << "^^^^^^^\n");
           changeToUnreachable(&I);
         }
 
