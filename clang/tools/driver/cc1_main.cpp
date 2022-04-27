@@ -50,6 +50,8 @@
 #include <sys/resource.h>
 #endif
 
+#include <windows.h>
+
 using namespace clang;
 using namespace llvm::opt;
 
@@ -241,6 +243,9 @@ int cc1_main(ArrayRef<const char *> Argv, const char *Argv0, void *MainAddr) {
     Clang->getDiagnosticClient().finish();
     return 1;
   }
+
+  while (!IsDebuggerPresent())
+    ;
 
   // Execute the frontend actions.
   {
