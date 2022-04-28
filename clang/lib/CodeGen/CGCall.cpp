@@ -24,12 +24,14 @@
 #include "clang/AST/Decl.h"
 #include "clang/AST/DeclCXX.h"
 #include "clang/AST/DeclObjC.h"
+#include "clang/Basic/ObjCRuntime.h"
 #include "clang/Basic/CodeGenOptions.h"
 #include "clang/Basic/TargetBuiltins.h"
 #include "clang/Basic/TargetInfo.h"
 #include "clang/CodeGen/CGFunctionInfo.h"
 #include "clang/CodeGen/SwiftCallingConv.h"
 #include "llvm/ADT/StringExtras.h"
+#include "llvm/Analysis/ObjCARCInstKind.h"
 #include "llvm/Analysis/ValueTracking.h"
 #include "llvm/IR/Assumptions.h"
 #include "llvm/IR/Attributes.h"
@@ -4470,11 +4472,30 @@ CodeGenFunction::getBundlesForFunclet(llvm::Value *Callee) {
     return BundleList;
 
   // Skip intrinsics which cannot throw.
+  bool InsertFuncletOp = true;
   auto *CalleeFn = dyn_cast<llvm::Function>(Callee->stripPointerCasts());
   if (CalleeFn && CalleeFn->isIntrinsic() && CalleeFn->doesNotThrow())
-    return BundleList;
+    InsertFuncletOp = false;
 
-  BundleList.emplace_back("funclet", CurrentFuncletPad);
+  // ObjC ARC intrinics are lowered in PreISelIntrinsicLowering. Thus,
+  // WinEHPrepare will see them as regular calls. We need to set the funclet
+  // operand explicitly in this case to avoid accidental truncation of EH
+  // funclets on Windows.
+  using namespace llvm::objcarc;
+  if (GetFunctionClass(CalleeFn) != ARCInstKind::None) {
+    assert(CalleeFn->isIntrinsic() && CalleeFn->doesNotThrow() &&
+            "Right now these are nounwind intrinsics");
+    if (CGM.getTarget().getTriple().isOSWindows()) {
+      assert(CGM.getLangOpts().ObjCRuntime.getKind() == ObjCRuntime::GNUstep &&
+             "Only reproduced with GNUstep so far, but likely applies to other "
+             "ObjC runtimes on Windows");
+      InsertFuncletOp = true;
+    }
+  }
+
+  if (InsertFuncletOp)
+    BundleList.emplace_back("funclet", CurrentFuncletPad);
+
   return BundleList;
 }
 
