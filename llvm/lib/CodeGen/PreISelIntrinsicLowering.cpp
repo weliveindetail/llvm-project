@@ -110,6 +110,10 @@ static bool lowerObjCCall(Function &F, const char *NewFn,
     CallInst *NewCI = Builder.CreateCall(FCache, Args);
     NewCI->setName(CI->getName());
 
+    assert(!CB->hasFnAttr(Attribute::NoUnwind) &&
+           CI->hasFnAttr(Attribute::NoUnwind) &&
+           "Lowered call sites should retain NoUnwind attribute");
+
     // Try to set the most appropriate TailCallKind based on both the current
     // attributes and the ones that we could get from ObjCARC's special
     // knowledge of the runtime functions.
