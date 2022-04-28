@@ -24,6 +24,7 @@
 #include "clang/AST/Decl.h"
 #include "clang/AST/DeclCXX.h"
 #include "clang/AST/DeclObjC.h"
+#include "clang/Basic/ObjCRuntime.h"
 #include "clang/Basic/CodeGenOptions.h"
 #include "clang/Basic/TargetBuiltins.h"
 #include "clang/Basic/TargetInfo.h"
@@ -4469,10 +4470,16 @@ CodeGenFunction::getBundlesForFunclet(llvm::Value *Callee) {
   if (!CurrentFuncletPad)
     return BundleList;
 
+  bool PreISelLoweringCanCauseCleanupPadTruncationInWinEHPrepare =
+      CGM.getTarget().getTriple().isOSWindows() &&
+      CGM.getLangOpts().ObjCRuntime.getKind() == ObjCRuntime::GNUstep;
+
   // Skip intrinsics which cannot throw.
-  auto *CalleeFn = dyn_cast<llvm::Function>(Callee->stripPointerCasts());
-  if (CalleeFn && CalleeFn->isIntrinsic() && CalleeFn->doesNotThrow())
-    return BundleList;
+  if (!PreISelLoweringCanCauseCleanupPadTruncationInWinEHPrepare) {
+    auto *CalleeFn = dyn_cast<llvm::Function>(Callee->stripPointerCasts());
+    if (CalleeFn && CalleeFn->isIntrinsic() && CalleeFn->doesNotThrow())
+      return BundleList;
+  }
 
   BundleList.emplace_back("funclet", CurrentFuncletPad);
   return BundleList;
