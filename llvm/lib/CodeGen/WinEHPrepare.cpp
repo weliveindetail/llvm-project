@@ -990,6 +990,10 @@ void WinEHPrepare::removeImplausibleInstructions(Function &F) {
             if (CB->hasFnAttr(Attribute::NonLazyBind))
               dbgs() << "CB->hasFnAttr(Attribute::NonLazyBind)\n";
           });
+          if (CalledFn->getName().startswith("objc_")) {
+            LLVM_DEBUG(dbgs() << "Skip: objc runtime call\n");
+            continue;
+          }
           if (CB->isInlineAsm()) {
             LLVM_DEBUG(dbgs() << "Skip: inline asm\n");
             continue;
