@@ -109,6 +109,8 @@ static bool lowerObjCCall(Function &F, const char *NewFn,
     SmallVector<Value *, 8> Args(CI->args());
     CallInst *NewCI = Builder.CreateCall(FCache, Args);
     NewCI->setName(CI->getName());
+    if (CI->hasFnAttr(Attribute::NoUnwind))
+      NewCI->addFnAttr(Attribute::NoUnwind);
 
     // Try to set the most appropriate TailCallKind based on both the current
     // attributes and the ones that we could get from ObjCARC's special
