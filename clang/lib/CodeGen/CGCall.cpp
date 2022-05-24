@@ -4467,29 +4467,33 @@ SmallVector<llvm::OperandBundleDef, 1>
 CodeGenFunction::getBundlesForFunclet(llvm::Value *Callee) {
   SmallVector<llvm::OperandBundleDef, 1> BundleList;
   // There is no need for a funclet operand bundle if we aren't inside a
-  // funclet.
+  // funclet or the callee is not a function.
   if (!CurrentFuncletPad)
+    return BundleList;
+  auto* CalleeFn = dyn_cast<llvm::Function>(Callee->stripPointerCasts());
+  if (!CalleeFn)
     return BundleList;
 
   // Skip intrinsics which cannot throw.
   bool InsertFuncletOp = true;
-  auto *CalleeFn = dyn_cast<llvm::Function>(Callee->stripPointerCasts());
-  if (CalleeFn && CalleeFn->isIntrinsic() && CalleeFn->doesNotThrow())
+  if (CalleeFn->isIntrinsic() && CalleeFn->doesNotThrow())
     InsertFuncletOp = false;
 
-  // ObjC ARC intrinics are lowered in PreISelIntrinsicLowering. Thus,
+  // Most ObjC ARC intrinics are lowered in PreISelIntrinsicLowering. Thus,
   // WinEHPrepare will see them as regular calls. We need to set the funclet
-  // operand explicitly in this case to avoid accidental truncation of EH
-  // funclets on Windows.
+  // operand explicitly in this case to avoid accidental truncation of cleanup
+  // pads on Windows.
   using namespace llvm::objcarc;
-  if (GetFunctionClass(CalleeFn) != ARCInstKind::None) {
-    assert(CalleeFn->isIntrinsic() && CalleeFn->doesNotThrow() &&
-            "Right now these are nounwind intrinsics");
-    if (CGM.getTarget().getTriple().isOSWindows()) {
-      assert(CGM.getLangOpts().ObjCRuntime.getKind() == ObjCRuntime::GNUstep &&
-             "Only reproduced with GNUstep so far, but likely applies to other "
-             "ObjC runtimes on Windows");
-      InsertFuncletOp = true;
+  if (isa<llvm::CleanupPadInst>(CurrentFuncletPad) && CalleeFn->isIntrinsic()) {
+    assert(CalleeFn->doesNotThrow() && "Right now these are nounwind");
+    ARCInstKind CalleeKind = GetFunctionClass(CalleeFn);
+    if (!IsUser(CalleeKind) && CalleeKind != ARCInstKind::None) {
+      if (CGM.getTarget().getTriple().isOSWindows()) {
+        assert(CGM.getLangOpts().ObjCRuntime.getKind() == ObjCRuntime::GNUstep &&
+               "Only reproduced with GNUstep so far, but likely applies to other "
+               "ObjC runtimes on Windows");
+        InsertFuncletOp = true;
+      }
     }
   }
 
