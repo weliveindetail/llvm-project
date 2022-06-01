@@ -2300,6 +2300,11 @@ llvm::InlineResult llvm::InlineFunction(CallBase &CB, InlineFunctionInfo &IFI,
         if (!I)
           continue;
 
+        auto *ThisShouldCrash =
+            llvm::dyn_cast<llvm::GlobalVariable>(I->getCalledOperand()->stripPointerCasts());
+        if (ThisShouldCrash->hasUniqueInitializer()) // CRASH ON DEREF HERE
+          llvm::outs() << "Unreachable\n";
+
         // Skip call sites which are nounwind intrinsics.
         auto *CalledFn =
             dyn_cast<Function>(I->getCalledOperand()->stripPointerCasts());
