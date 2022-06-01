@@ -2301,10 +2301,10 @@ llvm::InlineResult llvm::InlineFunction(CallBase &CB, InlineFunctionInfo &IFI,
           continue;
 
         // Skip call sites which are nounwind intrinsics.
-        auto *CalledFn =
-            dyn_cast<Function>(I->getCalledOperand()->stripPointerCasts());
-        if (CalledFn && CalledFn->isIntrinsic() && I->doesNotThrow())
-          continue;
+        //auto *CalledFn =
+        //    dyn_cast<Function>(I->getCalledOperand()->stripPointerCasts());
+        //if (CalledFn && CalledFn->isIntrinsic() && I->doesNotThrow())
+        //  continue;
 
         // Skip call sites which already have a "funclet" bundle.
         if (I->getOperandBundle(LLVMContext::OB_funclet))
