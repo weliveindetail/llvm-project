@@ -2,24 +2,23 @@
 
 ; Reduced IR generated from ObjC++ source:
 ;
-;     int main(void) {
-;       id ex1 = [Test new]; // Destroy when leaving main function (used to work)
+;     @class Ety;
+;     void opaque(void);
+;     void test_catch(void) {
 ;       @try {
-;         @throw ex1;
-;       } @catch (...) {
-;         id ex2 = [Test new]; // Destroy when leaving catchpad (D124762)
+;         opaque();
+;       } @catch (Ety *ex) {
+;         // Destroy ex when leaving catchpad. This emits calls to two intrinsic
+;         // functions, llvm.objc.retain and llvm.objc.storeStrong, but only one
+;         // is required to trigger the funclet truncation.
 ;       }
-;       return 0;
 ;     }
 
-@"$_OBJC_REF_CLASS_Test" = global i8* undef, section ".objcrt$CLR$m"
-
-define i32 @main() personality i8* bitcast (i32 (...)* @__CxxFrameHandler3 to i8*) {
+define void @test_catch() personality i8* bitcast (i32 (...)* @__CxxFrameHandler3 to i8*) {
 entry:
   %exn.slot = alloca i8*, align 8
   %ex2 = alloca i8*, align 8
-  invoke void bitcast (void ()* @objc_exception_throw to void (i8*)*)(i8* undef)
-          to label %invoke.cont unwind label %catch.dispatch
+  invoke void @opaque() to label %invoke.cont unwind label %catch.dispatch
 
 catch.dispatch:
   %0 = catchswitch within none [label %catch] unwind to caller
@@ -33,12 +32,12 @@ catch:
   catchret from %1 to label %catchret.dest
 
 catchret.dest:
-  ret i32 undef
+  ret void
 }
 
-declare i32 @__CxxFrameHandler3(...)
-declare void @objc_exception_throw()
+declare void @opaque()
 declare void @llvm.objc.storeStrong(i8**, i8*) #0
+declare i32 @__CxxFrameHandler3(...)
 
 attributes #0 = { nounwind }
 
