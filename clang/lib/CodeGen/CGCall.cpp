@@ -25,11 +25,13 @@
 #include "clang/AST/DeclCXX.h"
 #include "clang/AST/DeclObjC.h"
 #include "clang/Basic/CodeGenOptions.h"
+#include "clang/Basic/ObjCRuntime.h"
 #include "clang/Basic/TargetBuiltins.h"
 #include "clang/Basic/TargetInfo.h"
 #include "clang/CodeGen/CGFunctionInfo.h"
 #include "clang/CodeGen/SwiftCallingConv.h"
 #include "llvm/ADT/StringExtras.h"
+#include "llvm/Analysis/ObjCARCInstKind.h"
 #include "llvm/Analysis/ValueTracking.h"
 #include "llvm/IR/Assumptions.h"
 #include "llvm/IR/Attributes.h"
@@ -4465,16 +4467,37 @@ SmallVector<llvm::OperandBundleDef, 1>
 CodeGenFunction::getBundlesForFunclet(llvm::Value *Callee) {
   SmallVector<llvm::OperandBundleDef, 1> BundleList;
   // There is no need for a funclet operand bundle if we aren't inside a
-  // funclet.
+  // funclet or the callee is not a function.
   if (!CurrentFuncletPad)
+    return BundleList;
+  auto *CalleeFn = dyn_cast<llvm::Function>(Callee->stripPointerCasts());
+  if (!CalleeFn)
     return BundleList;
 
   // Skip intrinsics which cannot throw.
-  auto *CalleeFn = dyn_cast<llvm::Function>(Callee->stripPointerCasts());
-  if (CalleeFn && CalleeFn->isIntrinsic() && CalleeFn->doesNotThrow())
-    return BundleList;
+  bool InsertFuncletOp = true;
+  if (CalleeFn->isIntrinsic() && CalleeFn->doesNotThrow())
+    InsertFuncletOp = false;
 
-  BundleList.emplace_back("funclet", CurrentFuncletPad);
+  // Most ObjC ARC intrinics are lowered in PreISelIntrinsicLowering. Thus,
+  // WinEHPrepare will see them as regular calls. We need to set the funclet
+  // operand explicitly in this case to avoid accidental truncation of EH
+  // funclets on Windows.
+  if (CalleeFn->isIntrinsic() && CalleeFn->doesNotThrow()) {
+    if (CGM.getTarget().getTriple().isOSWindows()) {
+      assert(CGM.getLangOpts().ObjCRuntime.getKind() == ObjCRuntime::GNUstep &&
+             "Only reproduced with GNUstep so far, but likely applies to other "
+             "ObjC runtimes on Windows");
+      using namespace llvm::objcarc;
+      ARCInstKind CalleeKind = GetFunctionClass(CalleeFn);
+      if (!IsUser(CalleeKind) && CalleeKind != ARCInstKind::None)
+        InsertFuncletOp = true;
+    }
+  }
+
+  if (InsertFuncletOp)
+    BundleList.emplace_back("funclet", CurrentFuncletPad);
+
   return BundleList;
 }
 

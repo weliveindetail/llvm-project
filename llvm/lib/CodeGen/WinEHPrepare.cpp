@@ -963,7 +963,7 @@ void WinEHPrepare::removeImplausibleInstructions(Function &F) {
         if (auto BU = CB->getOperandBundle(LLVMContext::OB_funclet))
           FuncletBundleOperand = BU->Inputs.front();
 
-        if (FuncletBundleOperand == FuncletPad)
+        if (!FuncletPad || FuncletBundleOperand == FuncletPad)
           continue;
 
         // Skip call sites which are nounwind intrinsics or inline asm.
