@@ -14,10 +14,10 @@
 ;       }
 ;     }
 
-define void @test_catch() personality i8* bitcast (i32 (...)* @__CxxFrameHandler3 to i8*) {
+define void @test_catch() personality ptr @__CxxFrameHandler3 {
 entry:
-  %exn.slot = alloca i8*, align 8
-  %ex2 = alloca i8*, align 8
+  %exn.slot = alloca ptr, align 8
+  %ex2 = alloca ptr, align 8
   invoke void @opaque() to label %invoke.cont unwind label %catch.dispatch
 
 catch.dispatch:
@@ -27,8 +27,8 @@ invoke.cont:
   unreachable
 
 catch:
-  %1 = catchpad within %0 [i8* null, i32 64, i8** %exn.slot]
-  call void @llvm.objc.storeStrong(i8** %ex2, i8* null) [ "funclet"(token %1) ]
+  %1 = catchpad within %0 [ptr null, i32 64, ptr %exn.slot]
+  call void @llvm.objc.storeStrong(ptr %ex2, ptr null) [ "funclet"(token %1) ]
   catchret from %1 to label %catchret.dest
 
 catchret.dest:
@@ -36,7 +36,7 @@ catchret.dest:
 }
 
 declare void @opaque()
-declare void @llvm.objc.storeStrong(i8**, i8*) #0
+declare void @llvm.objc.storeStrong(ptr, ptr) #0
 declare i32 @__CxxFrameHandler3(...)
 
 attributes #0 = { nounwind }
@@ -49,7 +49,8 @@ attributes #0 = { nounwind }
 ;            ...
 ;     CHECK: .seh_endprologue
 ;
-; At this point the code used to be truncated:
+; At this point the code used to be truncated (and sometimes terminated with an
+; int3 opcode):
 ;     CHECK-NOT: int3
 ;
 ; Instead, the call to objc_storeStrong should be emitted:
