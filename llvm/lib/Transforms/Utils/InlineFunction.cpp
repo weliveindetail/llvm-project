@@ -1833,8 +1833,9 @@ llvm::InlineResult llvm::InlineFunction(CallBase &CB, InlineFunctionInfo &IFI,
   // We need to figure out which funclet the callsite was in so that we may
   // properly nest the callee.
   Instruction *CallSiteEHPad = nullptr;
+  EHPersonality Personality = EHPersonality::Unknown;
   if (CallerPersonality) {
-    EHPersonality Personality = classifyEHPersonality(CallerPersonality);
+    Personality = classifyEHPersonality(CallerPersonality);
     if (isScopedEHPersonality(Personality)) {
       Optional<OperandBundleUse> ParentFunclet =
           CB.getOperandBundle(LLVMContext::OB_funclet);
@@ -2305,11 +2306,23 @@ llvm::InlineResult llvm::InlineFunction(CallBase &CB, InlineFunctionInfo &IFI,
         if (!I)
           continue;
 
-        // Skip call sites which are nounwind intrinsics.
+        // Skip call sites which are nounwind intrinsics
         auto *CalledFn =
             dyn_cast<Function>(I->getCalledOperand()->stripPointerCasts());
-        if (CalledFn && CalledFn->isIntrinsic() && I->doesNotThrow())
-          continue;
+        if (CalledFn && CalledFn->isIntrinsic() && I->doesNotThrow()) {
+          // When targeting WinEH, we must propagate funclet tokens to pre-ISel
+          // intrinsics, if they get inlined into EH funclets. Otherwise,
+          // WinEHPrepare would mark them unreachable and cause truncations.
+          bool PropagateExplicitly = false;
+          if (Personality == EHPersonality::MSVC_CXX) {
+            using namespace llvm::objcarc;
+            ARCInstKind Kind = GetFunctionClass(CalledFn);
+            if (!IsUser(Kind) && Kind != ARCInstKind::None)
+              PropagateExplicitly = true;
+          }
+          if (!PropagateExplicitly)
+            continue;
+        }
 
         // Skip call sites which already have a "funclet" bundle.
         if (I->getOperandBundle(LLVMContext::OB_funclet))
