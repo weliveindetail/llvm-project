@@ -4484,9 +4484,6 @@ CodeGenFunction::getBundlesForFunclet(llvm::Value *Callee) {
     // funclets on Windows.
     if (CalleeFn->isIntrinsic() && CalleeFn->doesNotThrow()) {
       if (CGM.getTarget().getTriple().isOSWindows()) {
-        assert(CGM.getLangOpts().ObjCRuntime.getKind() == ObjCRuntime::GNUstep &&
-              "Only reproduced with GNUstep so far, but likely applies to other "
-              "ObjC runtimes on Windows");
         using namespace llvm::objcarc;
         ARCInstKind CalleeKind = GetFunctionClass(CalleeFn);
         if (!IsUser(CalleeKind) && CalleeKind != ARCInstKind::None)
