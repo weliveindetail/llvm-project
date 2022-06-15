@@ -4470,28 +4470,28 @@ CodeGenFunction::getBundlesForFunclet(llvm::Value *Callee) {
   // funclet or the callee is not a function.
   if (!CurrentFuncletPad)
     return BundleList;
-  auto *CalleeFn = dyn_cast<llvm::Function>(Callee->stripPointerCasts());
-  if (!CalleeFn)
-    return BundleList;
 
-  // Skip intrinsics which cannot throw.
   bool InsertFuncletOp = true;
-  if (CalleeFn->isIntrinsic() && CalleeFn->doesNotThrow())
-    InsertFuncletOp = false;
+  auto *CalleeFn = dyn_cast<llvm::Function>(Callee->stripPointerCasts());
+  if (CalleeFn) {
+    // Skip intrinsics which cannot throw.
+    if (CalleeFn->isIntrinsic() && CalleeFn->doesNotThrow())
+      InsertFuncletOp = false;
 
-  // Most ObjC ARC intrinics are lowered in PreISelIntrinsicLowering. Thus,
-  // WinEHPrepare will see them as regular calls. We need to set the funclet
-  // operand explicitly in this case to avoid accidental truncation of EH
-  // funclets on Windows.
-  if (CalleeFn->isIntrinsic() && CalleeFn->doesNotThrow()) {
-    if (CGM.getTarget().getTriple().isOSWindows()) {
-      assert(CGM.getLangOpts().ObjCRuntime.getKind() == ObjCRuntime::GNUstep &&
-             "Only reproduced with GNUstep so far, but likely applies to other "
-             "ObjC runtimes on Windows");
-      using namespace llvm::objcarc;
-      ARCInstKind CalleeKind = GetFunctionClass(CalleeFn);
-      if (!IsUser(CalleeKind) && CalleeKind != ARCInstKind::None)
-        InsertFuncletOp = true;
+    // Most ObjC ARC intrinics are lowered in PreISelIntrinsicLowering. Thus,
+    // WinEHPrepare will see them as regular calls. We need to set the funclet
+    // operand explicitly in this case to avoid accidental truncation of EH
+    // funclets on Windows.
+    if (CalleeFn->isIntrinsic() && CalleeFn->doesNotThrow()) {
+      if (CGM.getTarget().getTriple().isOSWindows()) {
+        assert(CGM.getLangOpts().ObjCRuntime.getKind() == ObjCRuntime::GNUstep &&
+              "Only reproduced with GNUstep so far, but likely applies to other "
+              "ObjC runtimes on Windows");
+        using namespace llvm::objcarc;
+        ARCInstKind CalleeKind = GetFunctionClass(CalleeFn);
+        if (!IsUser(CalleeKind) && CalleeKind != ARCInstKind::None)
+          InsertFuncletOp = true;
+      }
     }
   }
 
