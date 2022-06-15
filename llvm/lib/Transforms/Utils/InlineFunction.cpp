@@ -1833,8 +1833,9 @@ llvm::InlineResult llvm::InlineFunction(CallBase &CB, InlineFunctionInfo &IFI,
   // We need to figure out which funclet the callsite was in so that we may
   // properly nest the callee.
   Instruction *CallSiteEHPad = nullptr;
+  EHPersonality Personality = EHPersonality::Unknown;
   if (CallerPersonality) {
-    EHPersonality Personality = classifyEHPersonality(CallerPersonality);
+    Personality = classifyEHPersonality(CallerPersonality);
     if (isScopedEHPersonality(Personality)) {
       Optional<OperandBundleUse> ParentFunclet =
           CB.getOperandBundle(LLVMContext::OB_funclet);
@@ -2305,11 +2306,16 @@ llvm::InlineResult llvm::InlineFunction(CallBase &CB, InlineFunctionInfo &IFI,
         if (!I)
           continue;
 
-        // Skip call sites which are nounwind intrinsics.
-        auto *CalledFn =
-            dyn_cast<Function>(I->getCalledOperand()->stripPointerCasts());
-        if (CalledFn && CalledFn->isIntrinsic() && I->doesNotThrow())
-          continue;
+        // In general, skip call sites which are nounwind intrinsics. In some
+        // cases we still have to pass on the funclet bundle operand, e.g. MSVC
+        // EH funclets would get truncated for target runtimes that work with
+        // pre-ISel intrinsics.
+        if (Personality != EHPersonality::MSVC_CXX) {
+          auto *CalledFn =
+              dyn_cast<Function>(I->getCalledOperand()->stripPointerCasts());
+          if (CalledFn &&CalledFn->isIntrinsic() && I->doesNotThrow())
+            continue;
+        }
 
         // Skip call sites which already have a "funclet" bundle.
         if (I->getOperandBundle(LLVMContext::OB_funclet))
