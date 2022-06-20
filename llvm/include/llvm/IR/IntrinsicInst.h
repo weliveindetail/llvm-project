@@ -107,6 +107,9 @@ public:
     return false;
   }
 
+  // Check if this intrinsic might lower into a regular function call
+  static bool mayLowerToFunctionCall(Intrinsic::ID IID);
+
   // Methods for support type inquiry through isa, cast, and dyn_cast:
   static bool classof(const CallInst *I) {
     if (const Function *CF = I->getCalledFunction())
