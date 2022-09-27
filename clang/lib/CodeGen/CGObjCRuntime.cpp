@@ -215,6 +215,10 @@ void CGObjCRuntime::EmitTryCatchStmt(CodeGenFunction &CGF,
   // Emit the try body.
   CGF.EmitStmt(S.getTryBody());
 
+  // Just pop the cleanup if there is a __finally block.
+  if (useFunclets && S.getFinallyStmt())
+    CGF.PopCleanupBlock();
+
   // Leave the try.
   if (S.getNumCatchStmts())
     CGF.popCatchScope();
