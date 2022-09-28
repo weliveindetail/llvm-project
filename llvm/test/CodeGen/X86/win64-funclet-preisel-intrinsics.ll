@@ -42,6 +42,8 @@ catch:
   catchret from %1 to label %catchret.dest
 
 catchret.dest:
+  ; Uncomment this line to fail the test:
+  ;call void @llvm.objc.storeStrong(ptr %ex2, ptr null) [ "funclet"(token %1) ]
   ret void
 }
 
@@ -51,12 +53,21 @@ declare i32 @__CxxFrameHandler3(...)
 
 attributes #0 = { nounwind }
 
+; TODO:
+;                   # %catchret.dest
+;     CHECK-LABEL:  $ehgcr
+;     CHECK-NEXT:     nop
+;     CHECK-NEXT:     addq	$64, %rsp
+;     CHECK-NEXT:     popq	%rbp
+;     CHECK-NEXT:     retq
+;     CHECK-NEXT:     .seh_handlerdata
+;
 ; EH catchpad with SEH prologue:
-;     CHECK: # %catch
-;     CHECK: pushq   %rbp
-;     CHECK: .seh_pushreg %rbp
-;            ...
-;     CHECK: .seh_endprologue
+;     CHECK-LABEL:  # %catch
+;     CHECK:        pushq   %rbp
+;     CHECK:        .seh_pushreg %rbp
+;                   ...
+;     CHECK:        .seh_endprologue
 ;
 ; At this point the code used to be truncated (and sometimes terminated with an
 ; int3 opcode):
