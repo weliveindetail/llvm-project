@@ -130,9 +130,7 @@ DenseMap<BasicBlock *, ColorVector> llvm::colorEHFunclets(Function &F) {
     Instruction *Terminator = Visiting->getTerminator();
     if (auto *CatchRet = dyn_cast<CatchReturnInst>(Terminator)) {
       Value *ParentPad = CatchRet->getCatchSwitchParentPad();
-      if (isa<ConstantTokenNone>(ParentPad))
-        SuccColor = EntryBlock;
-      else
+      if (!isa<ConstantTokenNone>(ParentPad))
         SuccColor = cast<Instruction>(ParentPad)->getParent();
     }
 
