@@ -33,21 +33,27 @@ entry:
 catch.dispatch:
   %0 = catchswitch within none [label %catch] unwind to caller
 
-invoke.cont:
-  unreachable
+invoke.cont:                                      ; preds = %entry
+  br label %eh.cont
+
+eh.cont:                                          ; preds = %invoke.cont, %catchret.dest
+  ret void
 
 catch:
   %1 = catchpad within %0 [ptr null, i32 64, ptr %exn.slot]
-  call void @llvm.objc.storeStrong(ptr %ex2, ptr null) [ "funclet"(token %1) ]
+  %exn = load ptr, ptr %exn.slot, align 8
+  %2 = call ptr @llvm.objc.retain(ptr %exn) #0 [ "funclet"(token %1) ]
+  store ptr %2, ptr %ex2, align 8
   catchret from %1 to label %catchret.dest
 
 catchret.dest:
   ; Uncomment this line to fail the test:
-  ;call void @llvm.objc.storeStrong(ptr %ex2, ptr null) [ "funclet"(token %1) ]
-  ret void
+  call void @llvm.objc.storeStrong(ptr %ex2, ptr null) #0 [ "funclet"(token %1) ]
+  br label %eh.cont
 }
 
 declare void @opaque()
+declare ptr @llvm.objc.retain(ptr) #0
 declare void @llvm.objc.storeStrong(ptr, ptr) #0
 declare i32 @__CxxFrameHandler3(...)
 
