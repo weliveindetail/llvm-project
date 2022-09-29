@@ -950,6 +950,9 @@ void WinEHPrepare::removeImplausibleInstructions(Function &F) {
     auto *CatchPad = dyn_cast_or_null<CatchPadInst>(FuncletPad);
     auto *CleanupPad = dyn_cast_or_null<CleanupPadInst>(FuncletPad);
 
+    dbgs() << format("FuncletPadBB: 0x%016" PRIx64 "\n", FuncletPadBB);
+    dbgs() << format("  FuncletPad: 0x%016" PRIx64 "\n", FuncletPad);
+
     for (BasicBlock *BB : BlocksInFunclet) {
       for (Instruction &I : *BB) {
         auto *CB = dyn_cast<CallBase>(&I);
@@ -959,6 +962,9 @@ void WinEHPrepare::removeImplausibleInstructions(Function &F) {
         Value *FuncletBundleOperand = nullptr;
         if (auto BU = CB->getOperandBundle(LLVMContext::OB_funclet))
           FuncletBundleOperand = BU->Inputs.front();
+
+        dbgs() << format("          BB: 0x%016" PRIx64 " -> ", BB)
+               << format("OB_funclet: 0x%016" PRIx64 "\n", FuncletBundleOperand);
 
         if (FuncletBundleOperand == FuncletPad)
           continue;
