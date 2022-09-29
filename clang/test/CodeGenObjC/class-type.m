@@ -1,6 +1,7 @@
 // RUN: %clang_cc1 -triple x86_64-unknown-unknown -fobjc-runtime=macosx-fragile-10.5 -emit-llvm -o - %s
 // RUN: %clang_cc1 -triple i386-apple-darwin9 -fobjc-runtime=macosx-fragile-10.5 -emit-llvm -o - %s
 // RUN: %clang_cc1 -triple x86_64-apple-darwin9 -fobjc-runtime=macosx-fragile-10.5 -emit-llvm -o - %s
+// RUN: %clang_cc1 -triple x86_64-pc-windows-msvc -fobjc-runtime=gnustep-2.0 -emit-llvm -o - %s
 
 
 @interface I0 {
