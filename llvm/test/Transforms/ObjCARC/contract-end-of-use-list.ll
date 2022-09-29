@@ -1,8 +1,6 @@
 ; RUN: opt -S < %s -objc-arc-expand -objc-arc-contract | FileCheck %s
 ; Don't crash.  Reproducer for a use_iterator bug from r203364.
 ; rdar://problem/16333235
-target datalayout = "e-m:o-i64:64-f80:128-n8:16:32:64-S128"
-target triple = "x86_64-apple-darwin13.2.0"
 
 %struct = type { i8*, i8* }
 
