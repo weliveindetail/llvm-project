@@ -966,7 +966,7 @@ void WinEHPrepare::removeImplausibleInstructions(Function &F) {
         dbgs() << format("          BB: 0x%016" PRIx64 " -> ", BB)
                << format("OB_funclet: 0x%016" PRIx64 "\n", FuncletBundleOperand);
 
-        if (FuncletBundleOperand == FuncletPad)
+        if (!FuncletPad || FuncletBundleOperand == FuncletPad)
           continue;
 
         // Skip call sites which are nounwind intrinsics or inline asm.
