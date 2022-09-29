@@ -1,6 +1,8 @@
 ; RUN: llc < %s -mtriple=i386-apple-darwin9 -mattr=+sse2  | FileCheck %s --check-prefix=X32
 ; RUN: llc < %s -mtriple=x86_64-apple-darwin -mattr=+sse2 | FileCheck %s --check-prefix=X64
 ; RUN: llc < %s -mtriple=x86_64-apple-darwin -mattr=-sse3 | FileCheck %s --check-prefix=X64_BAD
+; RUN: llc < %s -mtriple=x86_64-pc-windows-msvc -mattr=+sse2 | FileCheck %s --check-prefix=WinX64
+; RUN: llc < %s -mtriple=x86_64-pc-windows-msvc -mattr=-sse3 | FileCheck %s --check-prefix=X64_BAD
 
 ; Sibcall optimization of expanded libcalls.
 ; rdar://8707777
@@ -12,6 +14,9 @@ entry:
 
 ; X64-LABEL: foo:
 ; X64: jmp _sin
+
+; WinX64-LABEL: foo:
+; WinX64: jmp sin
   %0 = tail call double @sin(double %a) nounwind readonly
   ret double %0
 }
@@ -22,6 +27,9 @@ define float @bar(float %a) nounwind readonly ssp {
 
 ; X64-LABEL: bar:
 ; X64: jmp _sinf
+
+; WinX64-LABEL: bar:
+; WinX64: jmp sinf
 entry:
   %0 = tail call float @sinf(float %a) nounwind readonly
   ret float %0
