@@ -11,18 +11,25 @@
 ;
 ;     @class Ety;
 ;     void opaque(void);
-;     void test_catch_with_objc_intrinsic(void) {
+;     void nested() {
 ;       @try {
 ;         opaque();
 ;       } @catch (Ety *ex) {
-;         // Destroy ex when leaving catchpad. This would emit calls to two
+;         @throw ex;
+;       }
+;     }
+;     void test_catch_with_objc_intrinsic(void) {
+;       @try {
+;         nested();
+;       } @catch (Ety *ex2) {
+;         // Destroy ex2 when leaving catchpad. It involves calls to two
 ;         // intrinsic functions: llvm.objc.retain and llvm.objc.storeStrong
 ;       }
 ;     }
 ;
 ; llvm.objc.retain and llvm.objc.storeStrong both lower into regular function
-; calls before ISel. We only need one of them to trigger funclet truncation
-; during codegen:
+; calls before ISel. They are emitted in different funclet blocks and thus
+; caused slightly different truncations.
 
 define void @test_catch_with_objc_intrinsic() personality ptr @__CxxFrameHandler3 {
 entry:
@@ -34,7 +41,10 @@ catch.dispatch:                                   ; preds = %entry
   %0 = catchswitch within none [label %catch] unwind to caller
 
 invoke.cont:                                      ; preds = %entry
-  unreachable
+  br label %eh.cont
+
+eh.cont:                                          ; preds = %invoke.cont, %catchret.dest
+  ret void
 
 catch:                                            ; preds = %catch.dispatch
   %1 = catchpad within %0 [ptr null, i32 64, ptr %exn.slot]
@@ -50,11 +60,22 @@ catchret.dest:                                    ; preds = %catch
 
 declare void @opaque()
 declare ptr @llvm.objc.retain(ptr) #0
+declare void @llvm.objc.storeStrong(ptr, ptr) #0
 declare i32 @__CxxFrameHandler3(...)
 
 attributes #0 = { nounwind }
 
-; EH catchpad with SEH prologue:
+; Nested try-catch causes emission of a catchret.dest block, which used to be
+; truncated. Instead, the runtime call to storeStrong should be emitted:
+;                   # %catchret.dest
+;     CHECK-LABEL:  $ehgcr
+;     CHECK-NEXT:     leaq    -24(%rbp), %rcx
+;     CHECK-NEXT:     xorl    %edx, %edx
+;     CHECK-NEXT:     callq   objc_storeStrong
+;     CHECK-NEXT:     jmp     .LBB0_1
+;     CHECK-NEXT:     .seh_handlerdata
+
+; Top-level EH catchpad with SEH prologue:
 ;     CHECK-LABEL:  # %catch
 ;     CHECK:          pushq   %rbp
 ;     CHECK:          .seh_pushreg %rbp
