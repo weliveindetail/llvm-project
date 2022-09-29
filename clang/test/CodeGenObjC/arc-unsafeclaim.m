@@ -1,5 +1,6 @@
 //   Make sure it works on x86-64.
 // RUN: %clang_cc1 -no-opaque-pointers -triple x86_64-apple-darwin11 -fobjc-runtime=macosx-10.11 -fobjc-arc -emit-llvm -o - %s | FileCheck %s -check-prefix=CHECK -check-prefix=CHECK-UNOPTIMIZED -check-prefix=NOTAIL-CALL
+// RUN: %clang_cc1 -no-opaque-pointers -triple x86_64-pc-windows-msvc -fobjc-runtime=gnustep-2.0 -fobjc-arc -emit-llvm -o - %s | FileCheck %s -check-prefix=CHECK -check-prefix=CHECK-UNOPTIMIZED -check-prefix=NOTAIL-CALL
 
 // RUN: %clang_cc1 -no-opaque-pointers -triple x86_64-apple-darwin11 -fobjc-runtime=macosx-10.11 -fobjc-arc -emit-llvm -O2 -disable-llvm-passes -o - %s | FileCheck %s -check-prefix=ATTACHED-CALL
 
