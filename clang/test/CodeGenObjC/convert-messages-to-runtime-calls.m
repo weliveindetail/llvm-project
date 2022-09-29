@@ -1,7 +1,6 @@
 // RUN: %clang_cc1 -no-opaque-pointers -fobjc-runtime=macosx-10.10.0 -emit-llvm -o - %s -fno-objc-convert-messages-to-runtime-calls -fobjc-exceptions -fexceptions | FileCheck %s --check-prefix=MSGS
 // RUN: %clang_cc1 -no-opaque-pointers -fobjc-runtime=macosx-10.10.0 -emit-llvm -o - %s -fobjc-exceptions -fexceptions | FileCheck %s --check-prefix=CALLS
 // RUN: %clang_cc1 -no-opaque-pointers -fobjc-runtime=macosx-10.9.0 -emit-llvm -o - %s -fobjc-exceptions -fexceptions | FileCheck %s --check-prefix=MSGS
-// RUN: %clang_cc1 -triple x86_64-pc-windows-msvc -fobjc-runtime=gnustep-2.0 -emit-llvm -o - %s -fobjc-exceptions -fexceptions | FileCheck %s --check-prefix=CALLS
 // RUN: %clang_cc1 -no-opaque-pointers -fobjc-runtime=macosx-fragile-10.10.0 -emit-llvm -o - %s -fobjc-exceptions -fexceptions | FileCheck %s --check-prefix=MSGS
 // RUN: %clang_cc1 -no-opaque-pointers -fobjc-runtime=ios-8.0 -emit-llvm -o - %s -fobjc-exceptions -fexceptions | FileCheck %s --check-prefix=CALLS
 // RUN: %clang_cc1 -no-opaque-pointers -fobjc-runtime=ios-7.0 -emit-llvm -o - %s -fobjc-exceptions -fexceptions | FileCheck %s --check-prefix=MSGS
