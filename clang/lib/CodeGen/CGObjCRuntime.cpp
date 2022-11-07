@@ -227,21 +227,22 @@ void CGObjCRuntime::EmitTryCatchStmt(CodeGenFunction &CGF,
     CatchHandler &Handler = Handlers[I];
 
     CGF.EmitBlock(Handler.Block);
-    llvm::CatchPadInst *CPI = nullptr;
+
+    CodeGenFunction::LexicalScope Cleanups(CGF, Handler.Body->getSourceRange());
     SaveAndRestore<llvm::Instruction *> RestoreCurrentFuncletPad(CGF.CurrentFuncletPad);
     if (useFunclets)
-      if ((CPI = dyn_cast_or_null<llvm::CatchPadInst>(Handler.Block->getFirstNonPHI()))) {
+      if (auto *CPI = dyn_cast_or_null<llvm::CatchPadInst>(Handler.Block->getFirstNonPHI())) {
         CGF.CurrentFuncletPad = CPI;
         CPI->setOperand(2, CGF.getExceptionSlot().getPointer());
+        CGF.EHStack.pushCleanup<CatchRetScope>(NormalCleanup, CPI);
       }
+
     llvm::Value *RawExn = CGF.getExceptionFromSlot();
 
     // Enter the catch.
     llvm::Value *Exn = RawExn;
     if (beginCatchFn)
       Exn = CGF.EmitNounwindRuntimeCall(beginCatchFn, RawExn, "exn.adjusted");
-
-    CodeGenFunction::LexicalScope cleanups(CGF, Handler.Body->getSourceRange());
 
     if (endCatchFn) {
       // Add a cleanup to leave the catch.
@@ -260,15 +261,13 @@ void CGObjCRuntime::EmitTryCatchStmt(CodeGenFunction &CGF,
       CGF.EmitAutoVarDecl(*CatchParam);
       EmitInitOfCatchParam(CGF, CastExn, CatchParam);
     }
-    if (CPI)
-        CGF.EHStack.pushCleanup<CatchRetScope>(NormalCleanup, CPI);
 
     CGF.ObjCEHValueStack.push_back(Exn);
     CGF.EmitStmt(Handler.Body);
     CGF.ObjCEHValueStack.pop_back();
 
     // Leave any cleanups associated with the catch.
-    cleanups.ForceCleanup();
+    Cleanups.ForceCleanup();
 
     CGF.EmitBranchThroughCleanup(Cont);
   }
