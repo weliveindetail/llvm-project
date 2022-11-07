@@ -55,6 +55,12 @@ static cl::opt<bool> DemoteCatchSwitchPHIOnlyOpt(
     "demote-catchswitch-only", cl::Hidden,
     cl::desc("Demote catchswitch BBs only (for wasm EH)"), cl::init(false));
 
+static cl::opt<bool> ErrorOnDanglingFuncletTokens(
+    "no-dangling-funclet-tokens", cl::Hidden,
+    cl::desc("During WinEH cleanup don't remove instructions with funclet "
+             "tokens outside of actual funclets"),
+    cl::init(false));
+
 namespace {
 
 class WinEHPrepare : public FunctionPass {
@@ -969,6 +975,19 @@ void WinEHPrepare::removeImplausibleInstructions(Function &F) {
         if (CalledFn && ((CalledFn->isIntrinsic() && CB->doesNotThrow()) ||
                          CB->isInlineAsm()))
           continue;
+
+        if (!FuncletPad) {
+          std::string Buffer;
+          raw_string_ostream OS(Buffer);
+          OS << "Invalid funclet token in BasicBlock " << BB->getName()
+             << ": outside funclet " << *FuncletBundleOperand << "\n";
+          if (ErrorOnDanglingFuncletTokens) {
+            report_fatal_error(OS.str().c_str());
+          } else {
+            errs() << "Note: " << OS.str();
+            continue;
+          }
+        }
 
         // This call site was not part of this funclet, remove it.
         if (isa<InvokeInst>(CB)) {
