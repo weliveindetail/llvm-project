@@ -39,6 +39,7 @@
 #include "llvm/IR/IntrinsicInst.h"
 #include "llvm/IR/Intrinsics.h"
 #include "llvm/IR/Type.h"
+#include "llvm/Support/FormatVariadic.h"
 #include "llvm/Transforms/Utils/Local.h"
 using namespace clang;
 using namespace CodeGen;
@@ -4501,6 +4502,16 @@ CodeGenFunction::getBundlesForFunclet(llvm::Value *Callee) {
   if (!CurrentFuncletPad)
     return (SmallVector<llvm::OperandBundleDef, 1>());
 
+  if (isa<llvm::CleanupPadInst>(CurrentFuncletPad)) {
+    llvm::dbgs() << "CleanupPad ";
+  } else if (isa<llvm::CatchPadInst>(CurrentFuncletPad)) {
+    llvm::dbgs() << "CatchPad ";
+  } else {
+    llvm_unreachable("Invalid FuncletPad type");
+  }
+  llvm::dbgs() << llvm::formatv("{0:x}", CurrentFuncletPad) << " getBundlesForFunclet:\n";
+  Callee->print(llvm::dbgs(), true);
+
   // Skip intrinsics which cannot throw (as long as they don't lower into
   // regular function calls in the course of IR transformations).
   if (auto *CalleeFn = dyn_cast<llvm::Function>(Callee->stripPointerCasts())) {
@@ -4511,6 +4522,7 @@ CodeGenFunction::getBundlesForFunclet(llvm::Value *Callee) {
     }
   }
 
+  llvm::dbgs() << "Assigned!\n";
   SmallVector<llvm::OperandBundleDef, 1> BundleList;
   BundleList.emplace_back("funclet", CurrentFuncletPad);
   return BundleList;
