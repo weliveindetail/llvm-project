@@ -1334,8 +1334,6 @@ static void EmitSehScope(CodeGenFunction &CGF,
   llvm::BasicBlock *Cont = CGF.createBasicBlock("invoke.cont");
   SmallVector<llvm::OperandBundleDef, 1> BundleList =
       CGF.getBundlesForFunclet(SehCppScope.getCallee());
-  if (CGF.CurrentFuncletPad)
-    BundleList.emplace_back("funclet", CGF.CurrentFuncletPad);
   CGF.Builder.CreateInvoke(SehCppScope, Cont, InvokeDest, None, BundleList);
   CGF.EmitBlock(Cont);
 }
