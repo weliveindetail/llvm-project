@@ -1,4 +1,5 @@
-// RUN: %clang_cc1 -triple x86_64-pc-windows-msvc -emit-llvm -fobjc-arc -fexceptions -fobjc-exceptions -fobjc-runtime=gnustep-2.0 -o - %s | FileCheck %s --check-prefixes=CHECK
+// RUN: %clang_cc1 -O0 -triple x86_64-pc-windows-msvc -emit-llvm -fobjc-arc -fexceptions -fobjc-exceptions -fobjc-runtime=gnustep-2.0 -o - %s | FileCheck %s --check-prefixes=CHECK,CHECK-O0
+// RUN: %clang_cc1 -O2 -triple x86_64-pc-windows-msvc -emit-llvm -fobjc-arc -fexceptions -fobjc-exceptions -fobjc-runtime=gnustep-2.0 -mllvm -enable-objc-arc-opts=false -o - %s | FileCheck %s --check-prefixes=CHECK,CHECK-O2
 
 // WinEH requires funclet tokens on nounwind intrinsics if they lower to
 // regular function calls in the course of IR transformations.
@@ -38,10 +39,12 @@ void try_catch_with_objc_intrinsic() {
 // CHECK:             may_throw
 // CHECK:             [ "funclet"(token [[CATCHPAD]]) ]
 // CHECK:             call
-// CHECK:             @llvm.objc.storeStrong
+// CHECK-O0:          @llvm.objc.storeStrong
+// CHECK-O2:          @llvm.objc.release
 // CHECK:             [ "funclet"(token [[CATCHPAD]]) ]
-// CHECK:             catchret from [[CATCHPAD]] to label %catchret.dest
+// CHECK-O0:          catchret from [[CATCHPAD]] to label %catchret.dest
+// CHECK-O2:          catchret from [[CATCHPAD]] to label %eh.cont
 //
-// This block exists and it's empty:
-// CHECK:        catchret.dest:
-// CHECK-NEXT:     br label %eh.cont
+// In debug mode, this block exists and it's empty:
+// CHECK-O0:        catchret.dest:
+// CHECK-O0-NEXT:     br label %eh.cont
