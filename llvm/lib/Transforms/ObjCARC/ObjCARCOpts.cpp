@@ -546,7 +546,9 @@ class ObjCARCOpt {
   void MoveCalls(Value *Arg, RRInfo &RetainsToMove, RRInfo &ReleasesToMove,
                  BlotMapVector<Value *, RRInfo> &Retains,
                  DenseMap<Value *, RRInfo> &Releases,
-                 SmallVectorImpl<Instruction *> &DeadInsts, Module *M);
+                 SmallVectorImpl<Instruction *> &DeadInsts,
+                 const DenseMap<BasicBlock *, ColorVector> &BlockColors,
+                 Module *M);
 
   bool PairUpRetainsAndReleases(DenseMap<const BasicBlock *, BBState> &BBStates,
                                 BlotMapVector<Value *, RRInfo> &Retains,
@@ -559,7 +561,7 @@ class ObjCARCOpt {
 
   bool PerformCodePlacement(DenseMap<const BasicBlock *, BBState> &BBStates,
                             BlotMapVector<Value *, RRInfo> &Retains,
-                            DenseMap<Value *, RRInfo> &Releases, Module *M);
+                            DenseMap<Value *, RRInfo> &Releases, Function &F);
 
   void OptimizeWeakCalls(Function &F);
 
@@ -755,6 +757,18 @@ CloneCallInstForBB(CallInst &CI, BasicBlock &BB,
   }
 
   return CallInst::Create(&CI, OpBundles);
+}
+
+void addOpBundleForFunclet(BasicBlock *BB,
+                           const DenseMap<BasicBlock *, ColorVector> &BlockColors,
+                           SmallVectorImpl<OperandBundleDef> &OpBundles) {
+  if (!BlockColors.empty()) {
+    const ColorVector &CV = BlockColors.find(BB)->second;
+    assert(CV.size() == 1 && "non-unique color for block!");
+    BasicBlock *EHPadBB = CV.front();
+    if (auto *EHPad = dyn_cast<FuncletPadInst>(EHPadBB->getFirstNonPHI()))
+      OpBundles.emplace_back("funclet", EHPad);
+  }
 }
 }
 
@@ -1757,12 +1771,12 @@ bool ObjCARCOpt::Visit(Function &F,
 }
 
 /// Move the calls in RetainsToMove and ReleasesToMove.
-void ObjCARCOpt::MoveCalls(Value *Arg, RRInfo &RetainsToMove,
-                           RRInfo &ReleasesToMove,
-                           BlotMapVector<Value *, RRInfo> &Retains,
-                           DenseMap<Value *, RRInfo> &Releases,
-                           SmallVectorImpl<Instruction *> &DeadInsts,
-                           Module *M) {
+void ObjCARCOpt::MoveCalls(
+    Value *Arg, RRInfo &RetainsToMove, RRInfo &ReleasesToMove,
+    BlotMapVector<Value *, RRInfo> &Retains,
+    DenseMap<Value *, RRInfo> &Releases,
+    SmallVectorImpl<Instruction *> &DeadInsts,
+    const DenseMap<BasicBlock *, ColorVector> &BlockColors, Module *M) {
   Type *ArgTy = Arg->getType();
   Type *ParamTy = PointerType::getUnqual(Type::getInt8Ty(ArgTy->getContext()));
 
@@ -1773,7 +1787,9 @@ void ObjCARCOpt::MoveCalls(Value *Arg, RRInfo &RetainsToMove,
     Value *MyArg = ArgTy == ParamTy ? Arg :
                    new BitCastInst(Arg, ParamTy, "", InsertPt);
     Function *Decl = EP.get(ARCRuntimeEntryPointKind::Retain);
-    CallInst *Call = CallInst::Create(Decl, MyArg, "", InsertPt);
+    SmallVector<OperandBundleDef, 1> BundleList;
+    addOpBundleForFunclet(InsertPt->getParent(), BlockColors, BundleList);
+    CallInst *Call = CallInst::Create(Decl, MyArg, BundleList, "", InsertPt);
     Call->setDoesNotThrow();
     Call->setTailCall();
 
@@ -1786,7 +1802,9 @@ void ObjCARCOpt::MoveCalls(Value *Arg, RRInfo &RetainsToMove,
     Value *MyArg = ArgTy == ParamTy ? Arg :
                    new BitCastInst(Arg, ParamTy, "", InsertPt);
     Function *Decl = EP.get(ARCRuntimeEntryPointKind::Release);
-    CallInst *Call = CallInst::Create(Decl, MyArg, "", InsertPt);
+    SmallVector<OperandBundleDef, 1> BundleList;
+    addOpBundleForFunclet(InsertPt->getParent(), BlockColors, BundleList);
+    CallInst *Call = CallInst::Create(Decl, MyArg, BundleList, "", InsertPt);
     // Attach a clang.imprecise_release metadata tag, if appropriate.
     if (MDNode *M = ReleasesToMove.ReleaseMetadata)
       Call->setMetadata(MDKindCache.get(ARCMDKindID::ImpreciseRelease), M);
@@ -2015,8 +2033,13 @@ bool ObjCARCOpt::PairUpRetainsAndReleases(
 bool ObjCARCOpt::PerformCodePlacement(
     DenseMap<const BasicBlock *, BBState> &BBStates,
     BlotMapVector<Value *, RRInfo> &Retains,
-    DenseMap<Value *, RRInfo> &Releases, Module *M) {
+    DenseMap<Value *, RRInfo> &Releases, Function &F) {
   LLVM_DEBUG(dbgs() << "\n== ObjCARCOpt::PerformCodePlacement ==\n");
+
+  DenseMap<BasicBlock *, ColorVector> BlockColors;
+  if (F.hasPersonalityFn() &&
+      isScopedEHPersonality(classifyEHPersonality(F.getPersonalityFn())))
+    BlockColors = colorEHFunclets(F);
 
   bool AnyPairsCompletelyEliminated = false;
   SmallVector<Instruction *, 8> DeadInsts;
@@ -2053,15 +2076,15 @@ bool ObjCARCOpt::PerformCodePlacement(
     RRInfo RetainsToMove, ReleasesToMove;
 
     bool PerformMoveCalls = PairUpRetainsAndReleases(
-        BBStates, Retains, Releases, M, Retain, DeadInsts,
+        BBStates, Retains, Releases, F.getParent(), Retain, DeadInsts,
         RetainsToMove, ReleasesToMove, Arg, KnownSafe,
         AnyPairsCompletelyEliminated);
 
     if (PerformMoveCalls) {
       // Ok, everything checks out and we're all set. Let's move/delete some
       // code!
-      MoveCalls(Arg, RetainsToMove, ReleasesToMove,
-                Retains, Releases, DeadInsts, M);
+      MoveCalls(Arg, RetainsToMove, ReleasesToMove, Retains, Releases,
+                DeadInsts, BlockColors, F.getParent());
     }
   }
 
@@ -2251,9 +2274,8 @@ bool ObjCARCOpt::OptimizeSequences(Function &F) {
     return false;
 
   // Transform.
-  bool AnyPairsCompletelyEliminated = PerformCodePlacement(BBStates, Retains,
-                                                           Releases,
-                                                           F.getParent());
+  bool AnyPairsCompletelyEliminated =
+      PerformCodePlacement(BBStates, Retains, Releases, F);
 
   return AnyPairsCompletelyEliminated && NestingDetected;
 }
