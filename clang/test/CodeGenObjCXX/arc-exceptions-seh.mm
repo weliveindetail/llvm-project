@@ -1,5 +1,5 @@
 // RUN: %clang_cc1 -O0 -triple x86_64-pc-windows-msvc -emit-llvm -fobjc-arc -fexceptions -fobjc-exceptions -fobjc-runtime=gnustep-2.0 -o - %s | FileCheck %s --check-prefixes=CHECK,CHECK-O0
-// RUN: %clang_cc1 -O2 -triple x86_64-pc-windows-msvc -emit-llvm -fobjc-arc -fexceptions -fobjc-exceptions -fobjc-runtime=gnustep-2.0 -mllvm -enable-objc-arc-opts=false -o - %s | FileCheck %s --check-prefixes=CHECK,CHECK-O2
+// RUN: %clang_cc1 -O2 -triple x86_64-pc-windows-msvc -emit-llvm -fobjc-arc -fexceptions -fobjc-exceptions -fobjc-runtime=gnustep-2.0 -o - %s | FileCheck %s --check-prefixes=CHECK,CHECK-O2
 
 // WinEH requires funclet tokens on nounwind intrinsics if they can lower to
 // regular function calls in the course of IR transformations.
