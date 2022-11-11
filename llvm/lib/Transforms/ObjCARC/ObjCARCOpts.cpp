@@ -1812,7 +1812,11 @@ void ObjCARCOpt::MoveCalls(Value *Arg, RRInfo &RetainsToMove,
     Value *MyArg = ArgTy == ParamTy ? Arg :
                    new BitCastInst(Arg, ParamTy, "", InsertPt);
     Function *Decl = EP.get(ARCRuntimeEntryPointKind::Retain);
-    CallInst *Call = CallInst::Create(Decl, MyArg, "", InsertPt);
+    SmallVector<llvm::OperandBundleDef, 1> BundleList;
+    Instruction* BBFirstNonPhi = InsertPt->getParent()->getFirstNonPHI();
+    if (auto *FuncletPad = dyn_cast<FuncletPadInst>(BBFirstNonPhi))
+      BundleList.emplace_back("funclet", FuncletPad);
+    CallInst *Call = CallInst::Create(Decl, MyArg, BundleList, "", InsertPt);
     Call->setDoesNotThrow();
     Call->setTailCall();
 
@@ -1825,7 +1829,11 @@ void ObjCARCOpt::MoveCalls(Value *Arg, RRInfo &RetainsToMove,
     Value *MyArg = ArgTy == ParamTy ? Arg :
                    new BitCastInst(Arg, ParamTy, "", InsertPt);
     Function *Decl = EP.get(ARCRuntimeEntryPointKind::Release);
-    CallInst *Call = CallInst::Create(Decl, MyArg, "", InsertPt);
+    SmallVector<llvm::OperandBundleDef, 1> BundleList;
+    Instruction* BBFirstNonPhi = InsertPt->getParent()->getFirstNonPHI();
+    if (auto *FuncletPad = dyn_cast<FuncletPadInst>(BBFirstNonPhi))
+      BundleList.emplace_back("funclet", FuncletPad);
+    CallInst *Call = CallInst::Create(Decl, MyArg, BundleList, "", InsertPt);
     // Attach a clang.imprecise_release metadata tag, if appropriate.
     if (MDNode *M = ReleasesToMove.ReleaseMetadata)
       Call->setMetadata(MDKindCache.get(ARCMDKindID::ImpreciseRelease), M);
