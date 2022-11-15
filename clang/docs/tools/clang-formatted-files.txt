@@ -4998,7 +4998,7 @@ llvm/include/llvm/Analysis/Delinearization.h
 llvm/include/llvm/Analysis/DependenceGraphBuilder.h
 llvm/include/llvm/Analysis/DivergenceAnalysis.h
 llvm/include/llvm/Analysis/DomTreeUpdater.h
-llvm/include/llvm/Analysis/EHPersonalities.h
+llvm/include/llvm/IR/EHPersonalities.h
 llvm/include/llvm/Analysis/FunctionPropertiesAnalysis.h
 llvm/include/llvm/Analysis/IndirectCallPromotionAnalysis.h
 llvm/include/llvm/Analysis/IndirectCallVisitor.h

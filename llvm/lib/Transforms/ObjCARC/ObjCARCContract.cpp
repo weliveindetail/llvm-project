@@ -31,7 +31,7 @@
 #include "ProvenanceAnalysis.h"
 #include "llvm/ADT/Statistic.h"
 #include "llvm/Analysis/AliasAnalysis.h"
-#include "llvm/Analysis/EHPersonalities.h"
+#include "llvm/IR/EHPersonalities.h"
 #include "llvm/Analysis/ObjCARCUtil.h"
 #include "llvm/IR/Dominators.h"
 #include "llvm/IR/InlineAsm.h"
