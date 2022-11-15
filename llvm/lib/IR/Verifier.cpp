@@ -276,6 +276,8 @@ public:
 
 namespace {
 
+using ColorVector = TinyPtrVector<BasicBlock *>;
+
 class Verifier : public InstVisitor<Verifier>, VerifierSupport {
   friend class InstVisitor<Verifier>;
 
@@ -326,6 +328,12 @@ class Verifier : public InstVisitor<Verifier>, VerifierSupport {
   // Maps catchswitches and cleanuppads that unwind to siblings to the
   // terminators that indicate the unwind, used to detect cycles therein.
   MapVector<Instruction *, Instruction *> SiblingFuncletInfo;
+
+  /// If an EH funclet personality is in use (see isFuncletEHPersonality),
+  /// this will recompute which blocks are in which funclet. It is possible that
+  /// some blocks are in multiple funclets. Consider this analysis to be
+  /// expensive.
+  DenseMap<BasicBlock *, ColorVector> BlockEHFuncletColors;
 
   /// Cache of constants visited in search of ConstantExprs.
   SmallPtrSet<const Constant *, 32> ConstantExprVisited;
@@ -2436,6 +2444,142 @@ void Verifier::verifySiblingFuncletUnwinds() {
   }
 }
 
+
+
+
+
+
+enum class EHPersonality {
+  Unknown,
+  GNU_Ada,
+  GNU_C,
+  GNU_C_SjLj,
+  GNU_CXX,
+  GNU_CXX_SjLj,
+  GNU_ObjC,
+  MSVC_X86SEH,
+  MSVC_TableSEH,
+  MSVC_CXX,
+  CoreCLR,
+  Rust,
+  Wasm_CXX,
+  XL_CXX
+};
+
+
+/// See if the given exception handling personality function is one that we
+/// understand.  If so, return a description of it; otherwise return Unknown.
+EHPersonality classifyEHPersonality(const Value *Pers) {
+  const GlobalValue *F =
+      Pers ? dyn_cast<GlobalValue>(Pers->stripPointerCasts()) : nullptr;
+  if (!F || !F->getValueType() || !F->getValueType()->isFunctionTy())
+    return EHPersonality::Unknown;
+  return StringSwitch<EHPersonality>(F->getName())
+      .Case("__gnat_eh_personality", EHPersonality::GNU_Ada)
+      .Case("__gxx_personality_v0", EHPersonality::GNU_CXX)
+      .Case("__gxx_personality_seh0", EHPersonality::GNU_CXX)
+      .Case("__gxx_personality_sj0", EHPersonality::GNU_CXX_SjLj)
+      .Case("__gcc_personality_v0", EHPersonality::GNU_C)
+      .Case("__gcc_personality_seh0", EHPersonality::GNU_C)
+      .Case("__gcc_personality_sj0", EHPersonality::GNU_C_SjLj)
+      .Case("__objc_personality_v0", EHPersonality::GNU_ObjC)
+      .Case("_except_handler3", EHPersonality::MSVC_X86SEH)
+      .Case("_except_handler4", EHPersonality::MSVC_X86SEH)
+      .Case("__C_specific_handler", EHPersonality::MSVC_TableSEH)
+      .Case("__CxxFrameHandler3", EHPersonality::MSVC_CXX)
+      .Case("ProcessCLRException", EHPersonality::CoreCLR)
+      .Case("rust_eh_personality", EHPersonality::Rust)
+      .Case("__gxx_wasm_personality_v0", EHPersonality::Wasm_CXX)
+      .Case("__xlcxx_personality_v1", EHPersonality::XL_CXX)
+      .Default(EHPersonality::Unknown);
+}
+
+/// Returns true if this personality uses scope-style EH IR instructions:
+/// catchswitch, catchpad/ret, and cleanuppad/ret.
+static bool isScopedEHPersonality(EHPersonality Pers) {
+  switch (Pers) {
+  case EHPersonality::MSVC_CXX:
+  case EHPersonality::MSVC_X86SEH:
+  case EHPersonality::MSVC_TableSEH:
+  case EHPersonality::CoreCLR:
+  case EHPersonality::Wasm_CXX:
+    return true;
+  default:
+    return false;
+  }
+  llvm_unreachable("invalid enum");
+}
+
+
+static DenseMap<BasicBlock *, ColorVector> colorEHFunclets(Function &F) {
+  SmallVector<std::pair<BasicBlock *, BasicBlock *>, 16> Worklist;
+  BasicBlock *EntryBlock = &F.getEntryBlock();
+  DenseMap<BasicBlock *, ColorVector> BlockColors;
+
+  // Build up the color map, which maps each block to its set of 'colors'.
+  // For any block B the "colors" of B are the set of funclets F (possibly
+  // including a root "funclet" representing the main function) such that
+  // F will need to directly contain B or a copy of B (where the term "directly
+  // contain" is used to distinguish from being "transitively contained" in
+  // a nested funclet).
+  //
+  // Note: Despite not being a funclet in the truest sense, a catchswitch is
+  // considered to belong to its own funclet for the purposes of coloring.
+
+  DEBUG_WITH_TYPE("winehprepare-coloring", dbgs() << "\nColoring funclets for "
+                                                  << F.getName() << "\n");
+
+  Worklist.push_back({EntryBlock, EntryBlock});
+
+  while (!Worklist.empty()) {
+    BasicBlock *Visiting;
+    BasicBlock *Color;
+    std::tie(Visiting, Color) = Worklist.pop_back_val();
+    DEBUG_WITH_TYPE("winehprepare-coloring",
+                    dbgs() << "Visiting " << Visiting->getName() << ", "
+                           << Color->getName() << "\n");
+    Instruction *VisitingHead = Visiting->getFirstNonPHI();
+    if (VisitingHead->isEHPad()) {
+      // Mark this funclet head as a member of itself.
+      Color = Visiting;
+    }
+    // Note that this is a member of the given color.
+    ColorVector &Colors = BlockColors[Visiting];
+    if (!is_contained(Colors, Color))
+      Colors.push_back(Color);
+    else
+      continue;
+
+    DEBUG_WITH_TYPE("winehprepare-coloring",
+                    dbgs() << "  Assigned color \'" << Color->getName()
+                           << "\' to block \'" << Visiting->getName()
+                           << "\'.\n");
+
+    BasicBlock *SuccColor = Color;
+    Instruction *Terminator = Visiting->getTerminator();
+    if (auto *CatchRet = dyn_cast<CatchReturnInst>(Terminator)) {
+      Value *ParentPad = CatchRet->getCatchSwitchParentPad();
+      if (isa<ConstantTokenNone>(ParentPad))
+        SuccColor = EntryBlock;
+      else
+        SuccColor = cast<Instruction>(ParentPad)->getParent();
+    }
+
+    for (BasicBlock *Succ : successors(Visiting))
+      Worklist.push_back({Succ, SuccColor});
+  }
+  return BlockColors;
+}
+
+
+
+
+
+
+
+
+
+
 // visitFunction - Verify that a function is ok.
 //
 void Verifier::visitFunction(const Function &F) {
@@ -2574,12 +2718,16 @@ void Verifier::visitFunction(const Function &F) {
   verifyFunctionMetadata(MDs);
 
   // Check validity of the personality function
+  BlockEHFuncletColors.clear();
   if (F.hasPersonalityFn()) {
     auto *Per = dyn_cast<Function>(F.getPersonalityFn()->stripPointerCasts());
     if (Per)
       Check(Per->getParent() == F.getParent(),
             "Referencing personality function in another module!", &F,
             F.getParent(), Per, Per->getParent());
+
+    if (isScopedEHPersonality(classifyEHPersonality(F.getPersonalityFn())))
+      BlockEHFuncletColors = colorEHFunclets(const_cast<Function &>(F));
   }
 
   if (F.isMaterializable()) {
@@ -5655,6 +5803,45 @@ void Verifier::visitIntrinsicCall(Intrinsic::ID ID, CallBase &Call) {
     break;
   }
   };
+
+  if (IntrinsicInst::mayLowerToFunctionCall(ID)) {
+    // EH funclet coloring is done for MSVC-like personalities on visit function
+    Function *F = Call.getParent()->getParent();
+    if (F->hasPersonalityFn() &&
+        isScopedEHPersonality(classifyEHPersonality(F->getPersonalityFn()))) {
+      assert(!BlockEHFuncletColors.empty() && "Missing EH funclet coloring");
+
+      // Get the funclet token
+      Value *OpBundle = nullptr;
+      for (unsigned I = 0, E = Call.getNumOperandBundles(); I != E; ++I) {
+        OperandBundleUse BU = Call.getOperandBundleAt(I);
+        if (BU.getTagID() == LLVMContext::OB_funclet)
+          OpBundle = BU.Inputs.front();
+      }
+
+      // Find the catch-/cleanup-pad in the first funclet block
+      const auto &Entry = BlockEHFuncletColors.find(Call.getParent());
+      assert(Entry != BlockEHFuncletColors.end() &&
+             Entry->second.size() >= 1 && "Uncolored block");
+      FuncletPadInst *EHPad = nullptr;
+      for (BasicBlock *EHPadBB : Entry->second) {
+        if (auto *Inst = dyn_cast<FuncletPadInst>(EHPadBB->getFirstNonPHI())) {
+          Check(!EHPad, "Ambiguous FuncletPad for intrinsic call", &Call,
+                EHPad, Inst);
+          EHPad = Inst;
+        }
+      }
+
+      // All these cases can cause silent code truncations in WinEHPrepare
+      if (EHPad) {
+        Check(OpBundle, "Missing funclet token on intrinsic call", &Call);
+        Check(OpBundle == EHPad, "Invalid funclet token on intrinsic call",
+              &Call);
+      } else {
+        Check(!OpBundle, "Dangling funclet token on intrinsic call", &Call);
+      }
+    }
+  }
 }
 
 /// Carefully grab the subprogram from a local scope.
