@@ -1,110 +1,48 @@
-# The LLVM Compiler Infrastructure
+# frama-clang development
 
-This directory and its sub-directories contain source code for LLVM,
-a toolkit for the construction of highly optimized compilers,
-optimizers, and run-time environments.
+## Build LLVM with frama-clang in-tree
 
-The README briefly describes how to get started with building LLVM.
-For more information on how to contribute to the LLVM project, please
-take a look at the
-[Contributing to LLVM](https://llvm.org/docs/Contributing.html) guide.
+Depending on the throughput of your system, the final build step may take up to one our.
+```
+→ cd /home
+→ git clone --single-branch --branch frama-clang --depth 1 https://github.com/weliveindetail/llvm-project
+→ git clone https://github.com/weliveindetail/frama-clang llvm-project/clang/tools/frama-clang
+→ mkdir llvm-project/build && cd llvm-project/build
+→ cmake -GNinja -DCMAKE_BUILD_TYPE=Debug -DLLVM_TARGETS_TO_BUILD=host -DLLVM_ENABLE_PROJECTS=clang -DLLVM_BUILD_LLVM_DYLIB=On -DLLVM_ENABLE_RTTI=On -DLLVM_USE_LINKER=lld -DLLVM_ABI_BREAKING_CHECKS=FORCE_OFF ..
+→ ninja framaCIRGen
+```
 
-## Getting Started with the LLVM System
+## Rebuild frama-clang with an extra compiler warning
 
-Taken from https://llvm.org/docs/GettingStarted.html.
+Incremental builds should be quick, but won't catch all warnings, because usually not all translation units need to be recompiled. A clean rebuild does it and can be achieved by deleting the exising objects on disk explicitly, before starting the bulid. This is still quite quick:
+```
+→ cd llvm-project/build
+→ ninja -t commands framaCIRGen | grep ClangVisitor
+→ rm -rf tools/clang/tools/frama-clang/CMakeFiles/framaCIRGen.dir
+→ cd ..
+→ code clang/tools/frama-clang/CMakeLists.txt
+➜ git -C clang/tools/frama-clang diff -U0
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index fe52d70..4c850c2 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -62,0 +63,2 @@ endif()
++target_compile_options(framaCIRGen PRIVATE -Wsuggest-override)
++
+➜ cmake .
+➜ ninja framaCIRGen
+```
 
-### Overview
+## Trace frama-clang IR-gen execution
 
-Welcome to the LLVM project!
-
-The LLVM project has multiple components. The core of the project is
-itself called "LLVM". This contains all of the tools, libraries, and header
-files needed to process intermediate representations and converts it into
-object files.  Tools include an assembler, disassembler, bitcode analyzer, and
-bitcode optimizer.  It also contains basic regression tests.
-
-C-like languages use the [Clang](http://clang.llvm.org/) front end.  This
-component compiles C, C++, Objective-C, and Objective-C++ code into LLVM bitcode
--- and from there into object files, using LLVM.
-
-Other components include:
-the [libc++ C++ standard library](https://libcxx.llvm.org),
-the [LLD linker](https://lld.llvm.org), and more.
-
-### Getting the Source Code and Building LLVM
-
-The LLVM Getting Started documentation may be out of date.  The [Clang
-Getting Started](http://clang.llvm.org/get_started.html) page might have more
-accurate information.
-
-This is an example work-flow and configuration to get and build the LLVM source:
-
-1. Checkout LLVM (including related sub-projects like Clang):
-
-     * ``git clone https://github.com/llvm/llvm-project.git``
-
-     * Or, on windows, ``git clone --config core.autocrlf=false
-    https://github.com/llvm/llvm-project.git``
-
-2. Configure and build LLVM and Clang:
-
-     * ``cd llvm-project``
-
-     * ``mkdir build``
-
-     * ``cd build``
-
-     * ``cmake -G <generator> [options] ../llvm``
-
-        Some common build system generators are:
-
-        * ``Ninja`` --- for generating [Ninja](https://ninja-build.org)
-          build files. Most llvm developers use Ninja.
-        * ``Unix Makefiles`` --- for generating make-compatible parallel makefiles.
-        * ``Visual Studio`` --- for generating Visual Studio projects and
-          solutions.
-        * ``Xcode`` --- for generating Xcode projects.
-
-        Some Common options:
-
-        * ``-DLLVM_ENABLE_PROJECTS='...'`` --- semicolon-separated list of the LLVM
-          sub-projects you'd like to additionally build. Can include any of: clang,
-          clang-tools-extra, libcxx, libcxxabi, libunwind, lldb, compiler-rt, lld,
-          polly, or debuginfo-tests.
-
-          For example, to build LLVM, Clang, libcxx, and libcxxabi, use
-          ``-DLLVM_ENABLE_PROJECTS="clang;libcxx;libcxxabi"``.
-
-        * ``-DCMAKE_INSTALL_PREFIX=directory`` --- Specify for *directory* the full
-          path name of where you want the LLVM tools and libraries to be installed
-          (default ``/usr/local``).
-
-        * ``-DCMAKE_BUILD_TYPE=type`` --- Valid options for *type* are Debug,
-          Release, RelWithDebInfo, and MinSizeRel. Default is Debug.
-
-        * ``-DLLVM_ENABLE_ASSERTIONS=On`` --- Compile with assertion checks enabled
-          (default is Yes for Debug builds, No for all other build types).
-
-      * ``cmake --build . [-- [options] <target>]`` or your build system specified above
-        directly.
-
-        * The default target (i.e. ``ninja`` or ``make``) will build all of LLVM.
-
-        * The ``check-all`` target (i.e. ``ninja check-all``) will run the
-          regression tests to ensure everything is in working order.
-
-        * CMake will generate targets for each tool and library, and most
-          LLVM sub-projects generate their own ``check-<project>`` target.
-
-        * Running a serial build will be **slow**.  To improve speed, try running a
-          parallel build.  That's done by default in Ninja; for ``make``, use the option
-          ``-j NNN``, where ``NNN`` is the number of parallel jobs, e.g. the number of
-          CPUs you have.
-
-      * For more information see [CMake](https://llvm.org/docs/CMake.html)
-
-Consult the
-[Getting Started with LLVM](https://llvm.org/docs/GettingStarted.html#getting-started-with-llvm)
-page for detailed information on configuring and compiling LLVM. You can visit
-[Directory Layout](https://llvm.org/docs/GettingStarted.html#directory-layout)
-to learn about the layout of the source code tree.
+This approach is only applicable for microscopic examples. Prefer simultaneous debugging for real-world reproducers.
+```
+→ lldb -- build/framaCIRGen
+(lldb) target create "build/framaCIRGen"
+Current executable set to '/home/llvm-build/bin/framaCIRGen' (x86_64).
+(lldb) b main
+(lldb) command script import /home/tools/lldb-trace/trace.py
+(lldb) run -target x86_64-unknown-linux-gnu -std=c++11 -nostdinc -D__FC_MACHDEP_X86_64 --stop-annot-error -v -I /usr/local/share/frama-c/frama-clang/libc++ -I /usr/local/share/frama-c/libc -o /tmp/clang_ast877cadast_works tests/bugs/issue2564.cpp
+(lldb) lldb_trace -f /home/tickets/07-unique_ptr/mod/works.trace
+(lldb) q
+```
