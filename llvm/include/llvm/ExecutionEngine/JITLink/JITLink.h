@@ -18,6 +18,7 @@
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ExecutionEngine/JITLink/JITLinkMemoryManager.h"
 #include "llvm/ExecutionEngine/JITSymbol.h"
+#include "llvm/ExecutionEngine/Orc/Shared/ExecutorAddress.h"
 #include "llvm/ExecutionEngine/Orc/Shared/MemoryFlags.h"
 #include "llvm/Support/Allocator.h"
 #include "llvm/Support/BinaryStreamReader.h"
@@ -446,25 +447,28 @@ private:
 
   static Symbol &constructAnonDef(BumpPtrAllocator &Allocator, Block &Base,
                                   orc::ExecutorAddrDiff Offset,
+                                  orc::ExecutorAddrDiff VirtualOffset,
                                   orc::ExecutorAddrDiff Size, bool IsCallable,
                                   bool IsLive) {
     assert((Offset + Size) <= Base.getSize() &&
            "Symbol extends past end of block");
     auto *Sym = Allocator.Allocate<Symbol>();
-    new (Sym) Symbol(Base, Offset, StringRef(), Size, Linkage::Strong,
+    new (Sym) Symbol(Base, Offset + VirtualOffset, StringRef(), Size, Linkage::Strong,
                      Scope::Local, IsLive, IsCallable);
     return *Sym;
   }
 
   static Symbol &constructNamedDef(BumpPtrAllocator &Allocator, Block &Base,
-                                   orc::ExecutorAddrDiff Offset, StringRef Name,
-                                   orc::ExecutorAddrDiff Size, Linkage L,
-                                   Scope S, bool IsLive, bool IsCallable) {
+                                   orc::ExecutorAddrDiff Offset,
+                                   orc::ExecutorAddrDiff VirtualOffset,
+                                   StringRef Name, orc::ExecutorAddrDiff Size,
+                                   Linkage L, Scope S, bool IsLive,
+                                   bool IsCallable) {
     assert((Offset + Size) <= Base.getSize() &&
            "Symbol extends past end of block");
     assert(!Name.empty() && "Name cannot be empty");
     auto *Sym = Allocator.Allocate<Symbol>();
-    new (Sym) Symbol(Base, Offset, Name, Size, L, S, IsLive, IsCallable);
+    new (Sym) Symbol(Base, Offset + VirtualOffset, Name, Size, L, S, IsLive, IsCallable);
     return *Sym;
   }
 
@@ -860,6 +864,9 @@ private:
     Allocator.Deallocate(&S);
   }
 
+  std::pair<orc::ExecutorAddrDiff, orc::ExecutorAddrDiff>
+  splitArchVirtualOffset(orc::ExecutorAddrDiff Offset) const;
+
   static iterator_range<Section::block_iterator> getSectionBlocks(Section &S) {
     return S.blocks();
   }
@@ -1185,8 +1192,10 @@ public:
   Symbol &addAnonymousSymbol(Block &Content, orc::ExecutorAddrDiff Offset,
                              orc::ExecutorAddrDiff Size, bool IsCallable,
                              bool IsLive) {
-    auto &Sym = Symbol::constructAnonDef(Allocator, Content, Offset, Size,
-                                         IsCallable, IsLive);
+    auto [PhysicalOffset, VirtualOffset] = splitArchVirtualOffset(Offset);
+    auto &Sym =
+        Symbol::constructAnonDef(Allocator, Content, PhysicalOffset,
+                                 VirtualOffset, Size, IsCallable, IsLive);
     Content.getSection().addSymbol(Sym);
     return Sym;
   }
@@ -1200,8 +1209,10 @@ public:
                                                   return Sym->getName() == Name;
                                                 }) == 0) &&
            "Duplicate defined symbol");
-    auto &Sym = Symbol::constructNamedDef(Allocator, Content, Offset, Name,
-                                          Size, L, S, IsLive, IsCallable);
+    auto [PhysicalOffset, VirtualOffset] = splitArchVirtualOffset(Offset);
+    auto &Sym = Symbol::constructNamedDef(Allocator, Content, PhysicalOffset,
+                                          VirtualOffset, Name, Size, L, S,
+                                          IsLive, IsCallable);
     Content.getSection().addSymbol(Sym);
     return Sym;
   }

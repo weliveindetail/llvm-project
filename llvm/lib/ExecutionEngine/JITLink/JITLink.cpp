@@ -242,6 +242,23 @@ Block &LinkGraph::splitBlock(Block &B, size_t SplitIndex,
   return NewBlock;
 }
 
+std::pair<orc::ExecutorAddrDiff, orc::ExecutorAddrDiff>
+LinkGraph::splitArchVirtualOffset(orc::ExecutorAddrDiff Offset) const {
+  switch (TT.getArch()) {
+  case Triple::arm:
+  case Triple::armeb:
+  case Triple::thumb:
+  case Triple::thumbeb:
+    // On AArch32 the least significant bit (LSB) in a branch offset tells
+    // between Arm (LSB=0) and Thumb (LSB=1) destinations. We consider it a
+    // virtual offset since it isn't part of the physical branch range.
+    return {Offset & ~0x01, Offset & 0x01};
+  default:
+    break;
+  }
+  return {Offset, 0};
+}
+
 void LinkGraph::dump(raw_ostream &OS) {
   DenseMap<Block *, std::vector<Symbol *>> BlockSymbols;
 
