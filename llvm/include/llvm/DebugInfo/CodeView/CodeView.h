@@ -158,6 +158,8 @@ enum SourceLanguage : uint8_t {
   JScript = 0x0e,
   MSIL = 0x0f,
   HLSL = 0x10,
+  ObjC = 0x11,
+  ObjCpp = 0x12,
 
   Rust = 0x15,
 
