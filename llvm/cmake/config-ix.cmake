@@ -531,6 +531,7 @@ else ()
   endif ()
 endif ()
 
+message("CHECKING for DIA SDK")
 if( MSVC )
   set(SHLIBEXT ".lib")
   set(stricmp "_stricmp")
@@ -547,6 +548,7 @@ if( MSVC )
     set(MSVC_DIA_SDK_DIR "$ENV{VSINSTALLDIR}DIA SDK" CACHE PATH
         "Path to the DIA SDK")
   endif()
+  message("MSVC_DIA_SDK_DIR=${MSVC_DIA_SDK_DIR}")
 
   # See if the DIA SDK is available and usable.
   # Due to a bug in MSVC 2013's installation software, it is possible
@@ -561,6 +563,7 @@ if( MSVC )
   else()
     set(HAVE_DIA_SDK 0)
   endif()
+  message("HAVE_DIA_SDK=${HAVE_DIA_SDK}")
 
   option(LLVM_ENABLE_DIA_SDK "Use MSVC DIA SDK for debugging if available."
                              ${HAVE_DIA_SDK})
@@ -571,6 +574,7 @@ if( MSVC )
 else()
   set(LLVM_ENABLE_DIA_SDK 0)
 endif( MSVC )
+message("LLVM_ENABLE_DIA_SDK=${LLVM_ENABLE_DIA_SDK}")
 
 if( LLVM_ENABLE_THREADS )
   # Check if threading primitives aren't supported on this platform
