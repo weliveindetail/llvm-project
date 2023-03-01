@@ -622,6 +622,8 @@ ClangExpressionParser::ClangExpressionParser(
     }
   }
 
+  lang_opts.ObjCRuntime.set(ObjCRuntime::GNUstep, VersionTuple(2,0));
+
   lang_opts.ThreadsafeStatics = false;
   lang_opts.AccessControl = false; // Debuggers get universal access
   lang_opts.DollarIdents = true;   // $ indicates a persistent variable name
@@ -1045,8 +1047,8 @@ ClangExpressionParser::ParseInternal(DiagnosticManager &diagnostic_manager,
   bool should_create_file = completion_consumer != nullptr;
 
   // We also want a real file on disk if we generate full debug info.
-  should_create_file |= m_compiler->getCodeGenOpts().getDebugInfo() ==
-                        codegenoptions::FullDebugInfo;
+  should_create_file = true; // |= m_compiler->getCodeGenOpts().getDebugInfo() ==
+                             //codegenoptions::FullDebugInfo;
 
   if (should_create_file) {
     int temp_fd = -1;
