@@ -589,6 +589,8 @@ ClangExpressionParser::ClangExpressionParser(
     }
   }
 
+  lang_opts.ObjCRuntime.set(ObjCRuntime::GNUstep, VersionTuple(2,0));
+
   lang_opts.ThreadsafeStatics = false;
   lang_opts.AccessControl = false; // Debuggers get universal access
   lang_opts.DollarIdents = true;   // $ indicates a persistent variable name
