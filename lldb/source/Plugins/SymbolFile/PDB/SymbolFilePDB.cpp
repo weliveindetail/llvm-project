@@ -8,6 +8,7 @@
 
 #include "SymbolFilePDB.h"
 
+#include "LogChannelPDB.h"
 #include "PDBASTParser.h"
 #include "PDBLocationToDWARFExpression.h"
 
@@ -36,6 +37,7 @@
 #include "llvm/DebugInfo/PDB/IPDBSectionContrib.h"
 #include "llvm/DebugInfo/PDB/IPDBSourceFile.h"
 #include "llvm/DebugInfo/PDB/IPDBTable.h"
+#include "llvm/DebugInfo/PDB/PDBExtras.h"
 #include "llvm/DebugInfo/PDB/PDBSymbol.h"
 #include "llvm/DebugInfo/PDB/PDBSymbolBlock.h"
 #include "llvm/DebugInfo/PDB/PDBSymbolCompiland.h"
@@ -51,6 +53,7 @@
 #include "llvm/DebugInfo/PDB/PDBSymbolTypeFunctionSig.h"
 #include "llvm/DebugInfo/PDB/PDBSymbolTypeTypedef.h"
 #include "llvm/DebugInfo/PDB/PDBSymbolTypeUDT.h"
+#include "llvm/Support/raw_ostream.h"
 
 #include "Plugins/Language/CPlusPlus/CPlusPlusLanguage.h"
 #include "Plugins/Language/CPlusPlus/MSVCUndecoratedNameParser.h"
@@ -111,6 +114,7 @@ static bool ShouldUseNativeReader() {
 }
 
 void SymbolFilePDB::Initialize() {
+  LogChannelPDB::Initialize();
   if (ShouldUseNativeReader()) {
     npdb::SymbolFileNativePDB::Initialize();
   } else {
@@ -935,6 +939,14 @@ VariableSP SymbolFilePDB::ParseVariableForPDBData(
   auto result = m_variables.find(var_uid);
   if (result != m_variables.end())
     return result->second;
+
+  Log *log = GetLog(PDBLog::Lookups);
+  if (log) {
+    std::string Buffer;
+    llvm::raw_string_ostream OS(Buffer);
+    OS << "SymbolFilePDB::ParseVariableForPDBData " << pdb_data.getDataKind() << "\n";
+    LLDB_LOG(log, OS.str().c_str());
+  }
 
   ValueType scope = eValueTypeInvalid;
   bool is_static_member = false;
