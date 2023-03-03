@@ -294,6 +294,15 @@ SymbolFilePDB::ParseCompileUnitFunctionForPDBFunc(const PDBSymbolFunc &pdb_func,
   if (FunctionSP result = comp_unit.FindFunctionByUID(pdb_func.getSymIndexId()))
     return result.get();
 
+  if (Log *log = GetLog(PDBLog::Lookups)) {
+    std::string Buffer;
+    llvm::raw_string_ostream OS(Buffer);
+    OS << "Name = " << pdb_func.getName()
+       << ", Addr = " << pdb_func.getVirtualAddress()
+       << ", LocType = " << pdb_func.getLocationType();
+    LLDB_LOG(log, OS.str().c_str());
+  }
+
   auto file_vm_addr = pdb_func.getVirtualAddress();
   if (file_vm_addr == LLDB_INVALID_ADDRESS || file_vm_addr == 0)
     return nullptr;
@@ -940,11 +949,12 @@ VariableSP SymbolFilePDB::ParseVariableForPDBData(
   if (result != m_variables.end())
     return result->second;
 
-  Log *log = GetLog(PDBLog::Lookups);
-  if (log) {
+  if (Log *log = GetLog(PDBLog::Lookups)) {
     std::string Buffer;
     llvm::raw_string_ostream OS(Buffer);
-    OS << "SymbolFilePDB::ParseVariableForPDBData " << pdb_data.getDataKind() << "\n";
+    OS << "Name = " << pdb_data.getName()
+       << ", DataKind = " << pdb_data.getDataKind()
+       << ", LocType = " << pdb_data.getLocationType();
     LLDB_LOG(log, OS.str().c_str());
   }
 
