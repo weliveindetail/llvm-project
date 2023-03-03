@@ -314,7 +314,10 @@ SymbolFilePDB::ParseCompileUnitFunctionForPDBFunc(const PDBSymbolFunc &pdb_func,
   if (!func_range.GetBaseAddress().IsValid())
     return nullptr;
 
-  lldb_private::Type *func_type = ResolveTypeUID(pdb_func.getSymIndexId());
+  auto sym_uid = pdb_func.getSymIndexId();
+  m_compilands.insert(std::make_pair(sym_uid, comp_unit.GetID()));
+
+  lldb_private::Type *func_type = ResolveTypeUID(sym_uid);
   if (!func_type)
     return nullptr;
 
@@ -573,13 +576,15 @@ SymbolFilePDB::ParseVariablesForContext(const lldb_private::SymbolContext &sc) {
   return num_added;
 }
 
-lldb_private::Type *SymbolFilePDB::ResolveTypeUID(lldb::user_id_t type_uid) {
+lldb_private::Type *SymbolFilePDB::ResolveTypeUID(lldb::user_id_t sym_uid) {
   std::lock_guard<std::recursive_mutex> guard(GetModuleMutex());
-  auto find_result = m_types.find(type_uid);
+  auto find_result = m_types.find(sym_uid);
   if (find_result != m_types.end())
     return find_result->second.get();
 
-  auto cu = ParseCompileUnitForUID(type_uid);
+  auto compiland_uid = GetCompilandIdForSymUID(sym_uid);
+  auto cu = ParseCompileUnitForUID(compiland_uid);
+
   auto type_system_or_err = GetTypeSystemForLanguage(cu->GetLanguage());
   if (auto err = type_system_or_err.takeError()) {
     LLDB_LOG_ERROR(GetLog(LLDBLog::Symbols), std::move(err),
@@ -596,19 +601,19 @@ lldb_private::Type *SymbolFilePDB::ResolveTypeUID(lldb::user_id_t type_uid) {
   if (!pdb)
     return nullptr;
 
-  auto pdb_type = m_session_up->getSymbolById(type_uid);
+  auto pdb_type = m_session_up->getSymbolById(sym_uid);
   if (pdb_type == nullptr)
     return nullptr;
 
   lldb::TypeSP result = pdb->CreateLLDBTypeFromPDBType(*pdb_type);
   if (result) {
-    m_types.insert(std::make_pair(type_uid, result));
+    m_types.insert(std::make_pair(sym_uid, result));
   }
   return result.get();
 }
 
 std::optional<SymbolFile::ArrayInfo> SymbolFilePDB::GetDynamicArrayInfoForUID(
-    lldb::user_id_t type_uid, const lldb_private::ExecutionContext *exe_ctx) {
+    lldb::user_id_t sym_uid, const lldb_private::ExecutionContext *exe_ctx) {
   return std::nullopt;
 }
 
@@ -2008,6 +2013,15 @@ bool SymbolFilePDB::DeclContextMatchesThisSymbolFile(
     return true; // The type systems match, return true
 
   return false;
+}
+
+user_id_t SymbolFilePDB::GetCompilandIdForSymUID(user_id_t sym_uid) {
+  auto found_uid = m_compilands.find(sym_uid);
+  if (found_uid != m_compilands.end())
+    return found_uid->second;
+
+  // TODO
+  return 0;
 }
 
 uint32_t SymbolFilePDB::GetCompilandId(const llvm::pdb::PDBSymbolData &data) {
