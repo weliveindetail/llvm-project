@@ -267,6 +267,31 @@ if(LLVM_CCACHE_BUILD)
   endif()
 endif()
 
+if (WIN32)
+  if (CMAKE_C_COMPILER_LAUNCHER)
+    # Ccache has no support for /Zi, all calls will be rejected as uncacheable.
+    # Fall back to /Z7 instead in order to exploit the cache.
+    foreach(var_to_update
+      CMAKE_C_FLAGS
+      CMAKE_C_FLAGS_DEBUG
+      CMAKE_C_FLAGS_RELWITHDEBINFO)
+      string(REGEX REPLACE "(^| )/Z[i7I]($| )" " /Z7 "
+            "${var_to_update}" "${${var_to_update}}")
+    endforeach()
+  endif()
+  if (CMAKE_CXX_COMPILER_LAUNCHER)
+    # Ccache has no support for /Zi, all calls will be rejected as uncacheable.
+    # Fall back to /Z7 instead in order to exploit the cache.
+    foreach(var_to_update
+      CMAKE_CXX_FLAGS
+      CMAKE_CXX_FLAGS_DEBUG
+      CMAKE_CXX_FLAGS_RELWITHDEBINFO)
+      string(REGEX REPLACE "(^| )/Z[i7I]($| )" " /Z7 "
+            "${var_to_update}" "${${var_to_update}}")
+    endforeach()
+  endif()
+endif()
+
 set(LLVM_EXTERNAL_PROJECT_BUILD_TOOL_ARGS "" CACHE STRING
   "Optional arguments for the native tool used in CMake --build invocations for external projects.")
 mark_as_advanced(LLVM_EXTERNAL_PROJECT_BUILD_TOOL_ARGS)
