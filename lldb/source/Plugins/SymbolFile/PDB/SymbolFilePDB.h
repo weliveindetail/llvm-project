@@ -221,7 +221,7 @@ private:
   void GetCompileUnitIndex(const llvm::pdb::PDBSymbolCompiland &pdb_compiland,
                            uint32_t &index);
 
-  PDBASTParser *GetPDBAstParser();
+  PDBASTParser *GetPDBAstParser(lldb::LanguageType lang);
 
   std::unique_ptr<llvm::pdb::PDBSymbolCompiland>
   GetPDBCompilandByUID(uint32_t uid);
