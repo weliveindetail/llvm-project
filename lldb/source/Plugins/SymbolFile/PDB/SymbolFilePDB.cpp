@@ -580,20 +580,27 @@ lldb::CompUnitSP SymbolFilePDB::getCompileUnitByUID(lldb::user_id_t sym_uid) {
   if (auto sym = m_session_up->getConcreteSymbolById<PDBSymbolFunc>(sym_uid))
     return ParseCompileUnitForUID(sym->getCompilandId());
 
+//  if (auto sym = m_session_up->getConcreteSymbolById<PDBSymbolTypePointer>(sym_uid))
+//    return ParseCompileUnitForUID(sym->getCompilandId());
+
   // FIXME: Temporary road-block
   //llvm_unreachable("Other concrete symbol types know their compile unit?");
   return nullptr;
 }
 
 lldb_private::Type *SymbolFilePDB::ResolveTypeUID(lldb::user_id_t sym_uid) {
-  std::lock_guard<std::recursive_mutex> guard(GetModuleMutex());
-  auto find_result = m_types.find(sym_uid);
-  if (find_result != m_types.end())
-    return find_result->second.get();
-
   LanguageType lang = lldb::eLanguageTypeC_plus_plus;
   if (CompUnitSP cu = getCompileUnitByUID(sym_uid))
     lang = cu->GetLanguage();
+
+  return ResolveTypeUID(sym_uid, lang);
+}
+
+lldb_private::Type *SymbolFilePDB::ResolveTypeUID(lldb::user_id_t sym_uid,
+                                                  lldb::LanguageType lang) {
+  auto find_result = m_types.find(sym_uid);
+  if (find_result != m_types.end())
+    return find_result->second.get();
 
   auto type_system_or_err = GetTypeSystemForLanguage(lang);
   if (auto err = type_system_or_err.takeError()) {
