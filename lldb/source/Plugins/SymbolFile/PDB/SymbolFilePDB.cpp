@@ -615,7 +615,7 @@ lldb_private::Type *SymbolFilePDB::ResolveTypeUID(lldb::user_id_t sym_uid) {
   if (pdb_type == nullptr)
     return nullptr;
 
-  lldb::TypeSP result = pdb->CreateLLDBTypeFromPDBType(*pdb_type);
+  lldb::TypeSP result = pdb->CreateLLDBTypeFromPDBType(*pdb_type, lang);
   if (result) {
     m_types.insert(std::make_pair(sym_uid, result));
   }

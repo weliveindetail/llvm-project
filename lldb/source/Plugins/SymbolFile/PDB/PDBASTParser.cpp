@@ -370,7 +370,7 @@ PDBASTParser::~PDBASTParser() = default;
 
 // DebugInfoASTParser interface
 
-lldb::TypeSP PDBASTParser::CreateLLDBTypeFromPDBType(const PDBSymbol &type) {
+lldb::TypeSP PDBASTParser::CreateLLDBTypeFromPDBType(const PDBSymbol &type, LanguageType lang) {
   Declaration decl;
   Log *log = GetLog(PDBLog::Lookups);
   switch (type.getSymTag()) {
@@ -413,8 +413,16 @@ lldb::TypeSP PDBASTParser::CreateLLDBTypeFromPDBType(const PDBSymbol &type) {
     // symbols in PDB for types with const or volatile modifiers, but we need
     // to create only one declaration for them all.
     Type::ResolveState type_resolve_state;
-    CompilerType clang_type = m_ast.GetTypeForIdentifier<clang::CXXRecordDecl>(
-        ConstString(name), decl_context);
+    CompilerType clang_type;
+    switch (lang) {
+      case eLanguageTypeObjC:
+        clang_type = m_ast.GetTypeForIdentifier<clang::ObjCInterfaceDecl>(
+            ConstString(name), decl_context);
+        break;
+      default:
+        clang_type = m_ast.GetTypeForIdentifier<clang::CXXRecordDecl>(
+            ConstString(name), decl_context);
+    }
     if (!clang_type.IsValid()) {
       auto access = GetAccessibilityForUdt(*udt);
 
