@@ -403,6 +403,9 @@ lldb::TypeSP PDBASTParser::CreateLLDBTypeFromPDBType(const PDBSymbol &type) {
     if (name.empty())
       return nullptr;
 
+    if (log)
+      LLDB_LOG(log, "UDT type:");
+
     auto decl_context = GetDeclContextContainingSymbol(type);
 
     // Check if such an UDT already exists in the current context.
@@ -465,6 +468,9 @@ lldb::TypeSP PDBASTParser::CreateLLDBTypeFromPDBType(const PDBSymbol &type) {
 
     if (udt->isVolatileType())
       clang_type = clang_type.AddVolatileModifier();
+
+    if (log)
+      clang_type.dump();
 
     GetDeclarationForSymbol(type, decl);
     return m_ast.GetSymbolFile()->MakeType(
@@ -558,6 +564,9 @@ lldb::TypeSP PDBASTParser::CreateLLDBTypeFromPDBType(const PDBSymbol &type) {
         std::string(MSVCUndecoratedNameParser::DropScope(type_def->getName()));
     auto decl_ctx = GetDeclContextContainingSymbol(type);
 
+    if (log)
+      LLDB_LOG(log, "Typedef {0}:", name);
+
     // Check if such a typedef already exists in the current context
     CompilerType ast_typedef =
         m_ast.GetTypeForIdentifier<clang::TypedefNameDecl>(ConstString(name),
@@ -574,6 +583,9 @@ lldb::TypeSP PDBASTParser::CreateLLDBTypeFromPDBType(const PDBSymbol &type) {
       assert(typedef_decl);
       m_uid_to_decl[type.getSymIndexId()] = typedef_decl;
     }
+
+    if (log)
+      ast_typedef.dump();
 
     if (type_def->isConstType())
       ast_typedef = ast_typedef.AddConstModifier();
@@ -636,12 +648,10 @@ lldb::TypeSP PDBASTParser::CreateLLDBTypeFromPDBType(const PDBSymbol &type) {
       if (!arg_type)
         return nullptr;
       CompilerType arg_ast_type = arg_type->GetFullCompilerType();
-#ifndef NDEBUG
       if (log) {
         LLDB_LOG(log, "Argument {0}:", arg_idx + 1);
         arg_ast_type.dump();
       }
-#endif
       arg_list.push_back(arg_ast_type);
     }
     lldbassert(arg_list.size() <= num_args);
@@ -658,12 +668,10 @@ lldb::TypeSP PDBASTParser::CreateLLDBTypeFromPDBType(const PDBSymbol &type) {
     if (!return_type)
       return nullptr;
     CompilerType return_ast_type = return_type->GetFullCompilerType();
-#ifndef NDEBUG
-      if (log) {
-        LLDB_LOG(log, "Return type:");
-        return_ast_type.dump();
-      }
-#endif
+    if (log) {
+      LLDB_LOG(log, "Return type:");
+      return_ast_type.dump();
+    }
     uint32_t type_quals = 0;
     if (func_sig->isConstType())
       type_quals |= clang::Qualifiers::Const;
@@ -673,12 +681,10 @@ lldb::TypeSP PDBASTParser::CreateLLDBTypeFromPDBType(const PDBSymbol &type) {
     CompilerType func_sig_ast_type =
         m_ast.CreateFunctionType(return_ast_type, arg_list.data(),
                                  arg_list.size(), is_variadic, type_quals, cc);
-#ifndef NDEBUG
-      if (log) {
-        LLDB_LOG(log, "Full function signature:");
-        func_sig_ast_type.dump();
-      }
-#endif
+    if (log) {
+      LLDB_LOG(log, "Full function signature:");
+      func_sig_ast_type.dump();
+    }
 
     GetDeclarationForSymbol(type, decl);
     return m_ast.GetSymbolFile()->MakeType(
@@ -746,12 +752,10 @@ lldb::TypeSP PDBASTParser::CreateLLDBTypeFromPDBType(const PDBSymbol &type) {
       builtin_ast_type = builtin_ast_type.AddVolatileModifier();
 
     auto type_name = GetPDBBuiltinTypeName(*builtin_type, builtin_ast_type);
-#ifndef NDEBUG
-      if (log) {
-        LLDB_LOG(log, "Builtin type {0}:", type_name.AsCString("<invalid>"));
-        builtin_ast_type.dump();
-      }
-#endif
+    if (log) {
+      LLDB_LOG(log, "Builtin type {0}:", type_name.AsCString("<invalid>"));
+      builtin_ast_type.dump();
+    }
 
     return m_ast.GetSymbolFile()->MakeType(
         builtin_type->getSymIndexId(), type_name, bytes, nullptr,
@@ -783,6 +787,11 @@ lldb::TypeSP PDBASTParser::CreateLLDBTypeFromPDBType(const PDBSymbol &type) {
           pointee_type->GetForwardCompilerType());
       assert(pointer_ast_type);
 
+      if (log) {
+        LLDB_LOG(log, "Pointer to member type:");
+        pointer_ast_type.dump();
+      }
+
       return m_ast.GetSymbolFile()->MakeType(
           pointer_type->getSymIndexId(), ConstString(),
           pointer_type->getLength(), nullptr, LLDB_INVALID_UID,
@@ -807,6 +816,11 @@ lldb::TypeSP PDBASTParser::CreateLLDBTypeFromPDBType(const PDBSymbol &type) {
 
     if (pointer_type->isRestrictedType())
       pointer_ast_type = pointer_ast_type.AddRestrictModifier();
+
+    if (log) {
+      LLDB_LOG(log, "Pointer type:");
+      pointer_ast_type.dump();
+    }
 
     return m_ast.GetSymbolFile()->MakeType(
         pointer_type->getSymIndexId(), ConstString(), pointer_type->getLength(),
