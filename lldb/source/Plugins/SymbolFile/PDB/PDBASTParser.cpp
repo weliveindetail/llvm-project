@@ -435,11 +435,17 @@ lldb::TypeSP PDBASTParser::CreateLLDBTypeFromPDBType(const PDBSymbol &type, Lang
 
       clang_type = m_ast.CreateRecordType(
           decl_context, OptionalClangModuleID(), access, name, tag_type_kind,
-          lldb::eLanguageTypeC_plus_plus, &metadata);
+          lang, &metadata);
       assert(clang_type.IsValid());
 
-      auto record_decl =
-          m_ast.GetAsCXXRecordDecl(clang_type.GetOpaqueQualType());
+
+      clang::NamedDecl *record_decl;
+      if (lang == eLanguageTypeObjC) {
+        record_decl = m_ast.GetAsObjCInterfaceDecl(clang_type);
+      } else {
+        record_decl = m_ast.GetAsCXXRecordDecl(clang_type.GetOpaqueQualType());
+      }
+
       assert(record_decl);
       m_uid_to_decl[type.getSymIndexId()] = record_decl;
 
@@ -843,15 +849,20 @@ bool PDBASTParser::CompleteTypeFromPDB(
   if (GetClangASTImporter().CanImport(compiler_type))
     return GetClangASTImporter().CompleteType(compiler_type);
 
+  clang::NamedDecl *lookup_decl;
+  if (TypeSystemClang::IsObjCObjectOrInterfaceType(compiler_type)) {
+    lookup_decl = m_ast.GetAsObjCInterfaceDecl(compiler_type);
+  } else {
+    lookup_decl = m_ast.GetAsCXXRecordDecl(compiler_type.GetOpaqueQualType());
+  }
+
   // Remove the type from the forward declarations to avoid
   // an endless recursion for types like a linked list.
-  clang::CXXRecordDecl *record_decl =
-      m_ast.GetAsCXXRecordDecl(compiler_type.GetOpaqueQualType());
-  auto uid_it = m_forward_decl_to_uid.find(record_decl);
+  auto uid_it = m_forward_decl_to_uid.find(lookup_decl);
   if (uid_it == m_forward_decl_to_uid.end())
     return true;
 
-  auto symbol_file = static_cast<SymbolFilePDB *>(
+  auto *symbol_file = static_cast<SymbolFilePDB *>(
       m_ast.GetSymbolFile()->GetBackingSymbolFile());
   if (!symbol_file)
     return false;
