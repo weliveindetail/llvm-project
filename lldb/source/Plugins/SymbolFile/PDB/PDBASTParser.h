@@ -81,24 +81,24 @@ private:
 
   bool AddEnumValue(lldb_private::CompilerType enum_type,
                     const llvm::pdb::PDBSymbolData &data);
-  bool CompleteTypeFromUDT(lldb_private::SymbolFile &symbol_file,
+  bool CompleteTypeFromUDT(SymbolFilePDB &symbol_file,
                            lldb_private::CompilerType &compiler_type,
                            llvm::pdb::PDBSymbolTypeUDT &udt);
   void
-  AddRecordMembers(lldb_private::SymbolFile &symbol_file,
+  AddRecordMembers(SymbolFilePDB &symbol_file,
                    lldb_private::CompilerType &record_type,
                    PDBDataSymbolEnumerator &members_enum,
                    lldb_private::ClangASTImporter::LayoutInfo &layout_info);
   void
-  AddRecordBases(lldb_private::SymbolFile &symbol_file,
+  AddRecordBases(SymbolFilePDB &symbol_file,
                  lldb_private::CompilerType &record_type, int record_kind,
                  PDBBaseClassSymbolEnumerator &bases_enum,
                  lldb_private::ClangASTImporter::LayoutInfo &layout_info) const;
-  void AddRecordMethods(lldb_private::SymbolFile &symbol_file,
+  void AddRecordMethods(SymbolFilePDB &symbol_file,
                         lldb_private::CompilerType &record_type,
                         PDBFuncSymbolEnumerator &methods_enum);
   clang::CXXMethodDecl *
-  AddRecordMethod(lldb_private::SymbolFile &symbol_file,
+  AddRecordMethod(SymbolFilePDB &symbol_file,
                   lldb_private::CompilerType &record_type,
                   const llvm::pdb::PDBSymbolFunc &method) const;
 

@@ -1263,7 +1263,7 @@ bool PDBASTParser::AddEnumValue(CompilerType enum_type,
 }
 
 bool PDBASTParser::CompleteTypeFromUDT(
-    lldb_private::SymbolFile &symbol_file,
+    SymbolFilePDB &symbol_file,
     lldb_private::CompilerType &compiler_type,
     llvm::pdb::PDBSymbolTypeUDT &udt) {
   ClangASTImporter::LayoutInfo layout_info;
@@ -1303,7 +1303,7 @@ bool PDBASTParser::CompleteTypeFromUDT(
 }
 
 void PDBASTParser::AddRecordMembers(
-    lldb_private::SymbolFile &symbol_file,
+    SymbolFilePDB &symbol_file,
     lldb_private::CompilerType &record_type,
     PDBDataSymbolEnumerator &members_enum,
     lldb_private::ClangASTImporter::LayoutInfo &layout_info) {
@@ -1416,14 +1416,18 @@ void PDBASTParser::AddRecordMembers(
 }
 
 void PDBASTParser::AddRecordBases(
-    lldb_private::SymbolFile &symbol_file,
+    SymbolFilePDB &symbol_file,
     lldb_private::CompilerType &record_type, int record_kind,
     PDBBaseClassSymbolEnumerator &bases_enum,
     lldb_private::ClangASTImporter::LayoutInfo &layout_info) const {
   std::vector<std::unique_ptr<clang::CXXBaseSpecifier>> base_classes;
 
+  LanguageType lang = eLanguageTypeC_plus_plus;
+  if (TypeSystemClang::IsObjCObjectOrInterfaceType(record_type))
+    lang = eLanguageTypeObjC;
+
   while (auto base = bases_enum.getNext()) {
-    auto base_type = symbol_file.ResolveTypeUID(base->getTypeId());
+    auto base_type = symbol_file.ResolveTypeUID(base->getTypeId(), lang);
     if (!base_type)
       continue;
 
@@ -1453,19 +1457,25 @@ void PDBASTParser::AddRecordBases(
     if (is_virtual)
       continue;
 
-    auto decl = m_ast.GetAsCXXRecordDecl(base_comp_type.GetOpaqueQualType());
-    if (!decl)
-      continue;
-
-    auto offset = clang::CharUnits::fromQuantity(base->getOffset());
-    layout_info.base_offsets.insert(std::make_pair(decl, offset));
+    // We know that base_comp_type is an ObjCInterfaceDecl, but
+    // ClangASTImporter::LayoutInfo stores everything as clang::CXXRecordDecl.
+    // 
+    // clang::NamedDecl* decl;
+    // if (lang == eLanguageTypeObjC) {
+    //     decl = m_ast.GetAsObjCInterfaceDecl(base_comp_type);
+    //
+    clang::CXXRecordDecl* decl = m_ast.GetAsCXXRecordDecl(base_comp_type.GetOpaqueQualType());
+    if (decl) {
+      auto offset = clang::CharUnits::fromQuantity(base->getOffset());
+      layout_info.base_offsets.insert(std::make_pair(decl, offset));
+    }
   }
 
   m_ast.TransferBaseClasses(record_type.GetOpaqueQualType(),
                             std::move(base_classes));
 }
 
-void PDBASTParser::AddRecordMethods(lldb_private::SymbolFile &symbol_file,
+void PDBASTParser::AddRecordMethods(SymbolFilePDB &symbol_file,
                                     lldb_private::CompilerType &record_type,
                                     PDBFuncSymbolEnumerator &methods_enum) {
   while (std::unique_ptr<PDBSymbolFunc> method = methods_enum.getNext())
@@ -1475,7 +1485,7 @@ void PDBASTParser::AddRecordMethods(lldb_private::SymbolFile &symbol_file,
 }
 
 clang::CXXMethodDecl *
-PDBASTParser::AddRecordMethod(lldb_private::SymbolFile &symbol_file,
+PDBASTParser::AddRecordMethod(SymbolFilePDB &symbol_file,
                               lldb_private::CompilerType &record_type,
                               const llvm::pdb::PDBSymbolFunc &method) const {
   std::string name =
