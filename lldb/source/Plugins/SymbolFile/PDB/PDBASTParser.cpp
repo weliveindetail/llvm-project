@@ -835,7 +835,7 @@ lldb::TypeSP PDBASTParser::CreateLLDBTypeFromPDBType(const PDBSymbol &type, Lang
 
     return m_ast.GetSymbolFile()->MakeType(
         pointer_type->getSymIndexId(), ConstString(), pointer_type->getLength(),
-        nullptr, LLDB_INVALID_UID, lldb_private::Type::eEncodingIsUID, decl,
+        nullptr, pdb_pointer_type, lldb_private::Type::eEncodingIsUID, decl,
         pointer_ast_type, lldb_private::Type::ResolveState::Full);
   } break;
   default:
