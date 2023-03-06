@@ -242,10 +242,9 @@ private:
       const lldb_private::CompilerDeclContext &decl_ctx);
 
   uint32_t GetCompilandId(const llvm::pdb::PDBSymbolData &data);
-  lldb::user_id_t GetCompilandIdForSymUID(lldb::user_id_t sym_uid);
+  lldb::CompUnitSP getCompileUnitByUID(lldb::user_id_t sym_uid);
 
   llvm::DenseMap<uint32_t, lldb::CompUnitSP> m_comp_units;
-  llvm::DenseMap<uint32_t, uint32_t> m_compilands;
   llvm::DenseMap<uint32_t, lldb::TypeSP> m_types;
   llvm::DenseMap<uint32_t, lldb::VariableSP> m_variables;
   llvm::DenseMap<uint64_t, std::string> m_public_names;
