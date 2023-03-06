@@ -20,6 +20,7 @@
 #include "Plugins/TypeSystem/Clang/TypeSystemClang.h"
 #include "lldb/Core/Declaration.h"
 #include "lldb/Core/Module.h"
+#include "lldb/Symbol/CompileUnit.h"
 #include "lldb/Symbol/SymbolFile.h"
 #include "lldb/Symbol/TypeMap.h"
 #include "lldb/Symbol/TypeSystem.h"
@@ -879,7 +880,7 @@ bool PDBASTParser::CompleteTypeFromPDB(
 }
 
 clang::Decl *
-PDBASTParser::GetDeclForSymbol(const llvm::pdb::PDBSymbol &symbol) {
+PDBASTParser::GetDeclForSymbol(const llvm::pdb::PDBSymbol &symbol, lldb::LanguageType lang) {
   uint32_t sym_id = symbol.getSymIndexId();
   auto it = m_uid_to_decl.find(sym_id);
   if (it != m_uid_to_decl.end())
@@ -970,7 +971,8 @@ PDBASTParser::GetDeclForSymbol(const llvm::pdb::PDBSymbol &symbol) {
     clang::Decl *decl =
         GetDeclFromContextByName(m_ast.getASTContext(), *decl_context, name);
     if (!decl) {
-      auto type = symbol_file->ResolveTypeUID(data->getTypeId());
+      CompUnitSP comp_unit = symbol_file->getCompileUnitByUID(data->getSymIndexId());
+      auto type = symbol_file->ResolveTypeUID(data->getTypeId(), comp_unit->GetLanguage());
       if (!type)
         return nullptr;
 
@@ -993,7 +995,8 @@ PDBASTParser::GetDeclForSymbol(const llvm::pdb::PDBSymbol &symbol) {
     std::string name =
         std::string(MSVCUndecoratedNameParser::DropScope(func->getName()));
 
-    Type *type = symbol_file->ResolveTypeUID(sym_id);
+    CompUnitSP comp_unit = symbol_file->getCompileUnitByUID(func->getSymIndexId());
+    Type *type = symbol_file->ResolveTypeUID(sym_id, comp_unit->GetLanguage());
     if (!type)
       return nullptr;
 
@@ -1010,7 +1013,7 @@ PDBASTParser::GetDeclForSymbol(const llvm::pdb::PDBSymbol &symbol) {
               arg_enum = sig->findAllChildren<PDBSymbolTypeFunctionArg>()) {
         while (std::unique_ptr<PDBSymbolTypeFunctionArg> arg =
                    arg_enum->getNext()) {
-          Type *arg_type = symbol_file->ResolveTypeUID(arg->getTypeId());
+          Type *arg_type = symbol_file->ResolveTypeUID(arg->getTypeId(), comp_unit->GetLanguage());
           if (!arg_type)
             continue;
 
@@ -1042,20 +1045,21 @@ PDBASTParser::GetDeclForSymbol(const llvm::pdb::PDBSymbol &symbol) {
 
 clang::DeclContext *
 PDBASTParser::GetDeclContextForSymbol(const llvm::pdb::PDBSymbol &symbol) {
-  if (symbol.getSymTag() == PDB_SymType::Function) {
+  auto *symbol_file = static_cast<SymbolFilePDB *>(
+      m_ast.GetSymbolFile()->GetBackingSymbolFile());
+  if (!symbol_file)
+    return nullptr;
+
+  if (auto *pdb_func = llvm::dyn_cast<PDBSymbolFunc>(&symbol)) {
+    CompUnitSP cu = symbol_file->getCompileUnitByUID(symbol.getSymIndexId());
     clang::DeclContext *result =
-        llvm::dyn_cast_or_null<clang::FunctionDecl>(GetDeclForSymbol(symbol));
+        llvm::dyn_cast_or_null<clang::FunctionDecl>(GetDeclForSymbol(symbol, cu->GetLanguage()));
 
     if (result)
       m_decl_context_to_uid[result] = symbol.getSymIndexId();
 
     return result;
   }
-
-  auto symbol_file = static_cast<SymbolFilePDB *>(
-      m_ast.GetSymbolFile()->GetBackingSymbolFile());
-  if (!symbol_file)
-    return nullptr;
 
   auto type = symbol_file->ResolveTypeUID(symbol.getSymIndexId());
   if (!type)
@@ -1167,7 +1171,7 @@ void PDBASTParser::ParseDeclsForDeclContext(
 
   if (auto children = symbol->findAllChildren())
     while (auto child = children->getNext())
-      GetDeclForSymbol(*child);
+      GetDeclForSymbol(*child, eLanguageTypeC_plus_plus); // TODO?
 }
 
 clang::NamespaceDecl *

@@ -48,7 +48,7 @@ public:
   lldb::TypeSP CreateLLDBTypeFromPDBType(const llvm::pdb::PDBSymbol &type, lldb::LanguageType lang);
   bool CompleteTypeFromPDB(lldb_private::CompilerType &compiler_type);
 
-  clang::Decl *GetDeclForSymbol(const llvm::pdb::PDBSymbol &symbol);
+  clang::Decl *GetDeclForSymbol(const llvm::pdb::PDBSymbol &symbol, lldb::LanguageType lang);
 
   clang::DeclContext *
   GetDeclContextForSymbol(const llvm::pdb::PDBSymbol &symbol);
