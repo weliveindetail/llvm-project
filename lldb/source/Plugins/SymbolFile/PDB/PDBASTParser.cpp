@@ -8,6 +8,7 @@
 
 #include "PDBASTParser.h"
 
+#include "LogChannelPDB.h"
 #include "SymbolFilePDB.h"
 
 #include "clang/AST/CharUnits.h"
@@ -371,6 +372,7 @@ PDBASTParser::~PDBASTParser() = default;
 
 lldb::TypeSP PDBASTParser::CreateLLDBTypeFromPDBType(const PDBSymbol &type) {
   Declaration decl;
+  Log *log = GetLog(PDBLog::Lookups);
   switch (type.getSymTag()) {
   case PDB_SymType::BaseClass: {
     auto symbol_file = m_ast.GetSymbolFile();
@@ -609,6 +611,7 @@ lldb::TypeSP PDBASTParser::CreateLLDBTypeFromPDBType(const PDBSymbol &type) {
     } else
       llvm_unreachable("Unexpected PDB symbol!");
 
+    LLDB_LOG(log, "=== Resolving AST types for function '{0}' ===", name);
     auto arg_enum = func_sig->getArguments();
     uint32_t num_args = arg_enum->getChildCount();
     std::vector<CompilerType> arg_list;
@@ -633,6 +636,12 @@ lldb::TypeSP PDBASTParser::CreateLLDBTypeFromPDBType(const PDBSymbol &type) {
       if (!arg_type)
         return nullptr;
       CompilerType arg_ast_type = arg_type->GetFullCompilerType();
+#ifndef NDEBUG
+      if (log) {
+        LLDB_LOG(log, "Argument {0}:", arg_idx + 1);
+        arg_ast_type.dump();
+      }
+#endif
       arg_list.push_back(arg_ast_type);
     }
     lldbassert(arg_list.size() <= num_args);
@@ -649,6 +658,12 @@ lldb::TypeSP PDBASTParser::CreateLLDBTypeFromPDBType(const PDBSymbol &type) {
     if (!return_type)
       return nullptr;
     CompilerType return_ast_type = return_type->GetFullCompilerType();
+#ifndef NDEBUG
+      if (log) {
+        LLDB_LOG(log, "Return type:");
+        return_ast_type.dump();
+      }
+#endif
     uint32_t type_quals = 0;
     if (func_sig->isConstType())
       type_quals |= clang::Qualifiers::Const;
@@ -658,6 +673,12 @@ lldb::TypeSP PDBASTParser::CreateLLDBTypeFromPDBType(const PDBSymbol &type) {
     CompilerType func_sig_ast_type =
         m_ast.CreateFunctionType(return_ast_type, arg_list.data(),
                                  arg_list.size(), is_variadic, type_quals, cc);
+#ifndef NDEBUG
+      if (log) {
+        LLDB_LOG(log, "Full function signature:");
+        func_sig_ast_type.dump();
+      }
+#endif
 
     GetDeclarationForSymbol(type, decl);
     return m_ast.GetSymbolFile()->MakeType(
@@ -725,6 +746,12 @@ lldb::TypeSP PDBASTParser::CreateLLDBTypeFromPDBType(const PDBSymbol &type) {
       builtin_ast_type = builtin_ast_type.AddVolatileModifier();
 
     auto type_name = GetPDBBuiltinTypeName(*builtin_type, builtin_ast_type);
+#ifndef NDEBUG
+      if (log) {
+        LLDB_LOG(log, "Builtin type {0}:", type_name.AsCString("<invalid>"));
+        builtin_ast_type.dump();
+      }
+#endif
 
     return m_ast.GetSymbolFile()->MakeType(
         builtin_type->getSymIndexId(), type_name, bytes, nullptr,

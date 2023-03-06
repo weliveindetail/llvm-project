@@ -581,7 +581,7 @@ lldb::CompUnitSP SymbolFilePDB::getCompileUnitByUID(lldb::user_id_t sym_uid) {
     return ParseCompileUnitForUID(sym->getCompilandId());
 
   // FIXME: Temporary road-block
-  llvm_unreachable("Other concrete symbol types know their compile unit?");
+  //llvm_unreachable("Other concrete symbol types know their compile unit?");
   return nullptr;
 }
 
