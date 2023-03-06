@@ -171,6 +171,9 @@ public:
 
   void DumpClangAST(lldb_private::Stream &s) override;
 
+  uint32_t GetCompilandId(const llvm::pdb::PDBSymbolData &data);
+  lldb::CompUnitSP getCompileUnitByUID(lldb::user_id_t sym_uid);
+
 private:
   struct SecContribInfo {
     uint32_t Offset;
@@ -242,9 +245,6 @@ private:
 
   bool DeclContextMatchesThisSymbolFile(
       const lldb_private::CompilerDeclContext &decl_ctx);
-
-  uint32_t GetCompilandId(const llvm::pdb::PDBSymbolData &data);
-  lldb::CompUnitSP getCompileUnitByUID(lldb::user_id_t sym_uid);
 
   llvm::DenseMap<uint32_t, lldb::CompUnitSP> m_comp_units;
   llvm::DenseMap<uint32_t, lldb::TypeSP> m_types;

@@ -341,7 +341,7 @@ SymbolFilePDB::ParseCompileUnitFunctionForPDBFunc(const PDBSymbolFunc &pdb_func,
     llvm::dyn_cast_or_null<TypeSystemClang>(ts.get());
   if (!clang_type_system)
     return nullptr;
-  clang_type_system->GetPDBParser()->GetDeclForSymbol(pdb_func);
+  clang_type_system->GetPDBParser()->GetDeclForSymbol(pdb_func, lang);
 
   return func_sp.get();
 }
@@ -580,8 +580,8 @@ lldb::CompUnitSP SymbolFilePDB::getCompileUnitByUID(lldb::user_id_t sym_uid) {
   if (auto sym = m_session_up->getConcreteSymbolById<PDBSymbolFunc>(sym_uid))
     return ParseCompileUnitForUID(sym->getCompilandId());
 
-//  if (auto sym = m_session_up->getConcreteSymbolById<PDBSymbolTypePointer>(sym_uid))
-//    return ParseCompileUnitForUID(sym->getCompilandId());
+  if (auto sym = m_session_up->getConcreteSymbolById<PDBSymbolCompiland>(sym_uid))
+    return ParseCompileUnitForUID(sym_uid);
 
   // FIXME: Temporary road-block
   //llvm_unreachable("Other concrete symbol types know their compile unit?");
@@ -673,7 +673,7 @@ lldb_private::CompilerDecl SymbolFilePDB::GetDeclForUID(lldb::user_id_t uid) {
   if (!symbol)
     return CompilerDecl();
 
-  auto decl = pdb->GetDeclForSymbol(*symbol);
+  auto *decl = pdb->GetDeclForSymbol(*symbol, lang);
   if (!decl)
     return CompilerDecl();
 
@@ -1137,7 +1137,7 @@ SymbolFilePDB::ParseVariables(const lldb_private::SymbolContext &sc,
           LanguageType lang = sc.comp_unit->GetLanguage();
           PDBASTParser *ast = GetPDBAstParser(lang);
           if (ast)
-            ast->GetDeclForSymbol(*pdb_data);
+            ast->GetDeclForSymbol(*pdb_data, lang);
         }
       }
     }
