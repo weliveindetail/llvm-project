@@ -45,7 +45,7 @@ public:
   PDBASTParser(lldb_private::TypeSystemClang &ast);
   ~PDBASTParser();
 
-  lldb::TypeSP CreateLLDBTypeFromPDBType(const llvm::pdb::PDBSymbol &type);
+  lldb::TypeSP CreateLLDBTypeFromPDBType(const llvm::pdb::PDBSymbol &type, lldb::LanguageType lang);
   bool CompleteTypeFromPDB(lldb_private::CompilerType &compiler_type);
 
   clang::Decl *GetDeclForSymbol(const llvm::pdb::PDBSymbol &symbol);
