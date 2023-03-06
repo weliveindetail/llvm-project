@@ -375,11 +375,11 @@ lldb::TypeSP PDBASTParser::CreateLLDBTypeFromPDBType(const PDBSymbol &type, Lang
   Log *log = GetLog(PDBLog::Lookups);
   switch (type.getSymTag()) {
   case PDB_SymType::BaseClass: {
-    auto symbol_file = m_ast.GetSymbolFile();
+    auto *symbol_file = static_cast<SymbolFilePDB *>(m_ast.GetSymbolFile());
     if (!symbol_file)
       return nullptr;
 
-    auto ty = symbol_file->ResolveTypeUID(type.getRawSymbol().getTypeId());
+    auto ty = symbol_file->ResolveTypeUID(type.getRawSymbol().getTypeId(), lang);
     return ty ? ty->shared_from_this() : nullptr;
   } break;
   case PDB_SymType::UDT: {
@@ -559,12 +559,12 @@ lldb::TypeSP PDBASTParser::CreateLLDBTypeFromPDBType(const PDBSymbol &type, Lang
     auto type_def = llvm::dyn_cast<PDBSymbolTypeTypedef>(&type);
     assert(type_def);
 
-    SymbolFile *symbol_file = m_ast.GetSymbolFile();
+    auto *symbol_file = static_cast<SymbolFilePDB *>(m_ast.GetSymbolFile());
     if (!symbol_file)
       return nullptr;
 
     lldb_private::Type *target_type =
-        symbol_file->ResolveTypeUID(type_def->getTypeId());
+        symbol_file->ResolveTypeUID(type_def->getTypeId(), lang);
     if (!target_type)
       return nullptr;
 
@@ -636,6 +636,10 @@ lldb::TypeSP PDBASTParser::CreateLLDBTypeFromPDBType(const PDBSymbol &type, Lang
     uint32_t num_args = arg_enum->getChildCount();
     std::vector<CompilerType> arg_list;
 
+    auto *symbol_file = static_cast<SymbolFilePDB *>(m_ast.GetSymbolFile());
+    if (!symbol_file)
+      return nullptr;
+
     bool is_variadic = func_sig->isCVarArgs();
     // Drop last variadic argument.
     if (is_variadic)
@@ -645,12 +649,8 @@ lldb::TypeSP PDBASTParser::CreateLLDBTypeFromPDBType(const PDBSymbol &type, Lang
       if (!arg)
         break;
 
-      SymbolFile *symbol_file = m_ast.GetSymbolFile();
-      if (!symbol_file)
-        return nullptr;
-
       lldb_private::Type *arg_type =
-          symbol_file->ResolveTypeUID(arg->getSymIndexId());
+          symbol_file->ResolveTypeUID(arg->getSymIndexId(), lang);
       // If there's some error looking up one of the dependent types of this
       // function signature, bail.
       if (!arg_type)
@@ -665,12 +665,8 @@ lldb::TypeSP PDBASTParser::CreateLLDBTypeFromPDBType(const PDBSymbol &type, Lang
     lldbassert(arg_list.size() <= num_args);
 
     auto pdb_return_type = func_sig->getReturnType();
-    SymbolFile *symbol_file = m_ast.GetSymbolFile();
-    if (!symbol_file)
-      return nullptr;
-
     lldb_private::Type *return_type =
-        symbol_file->ResolveTypeUID(pdb_return_type->getSymIndexId());
+        symbol_file->ResolveTypeUID(pdb_return_type->getSymIndexId(), lang);
     // If there's some error looking up one of the dependent types of this
     // function signature, bail.
     if (!return_type)
@@ -709,13 +705,13 @@ lldb::TypeSP PDBASTParser::CreateLLDBTypeFromPDBType(const PDBSymbol &type, Lang
     if (uint64_t size = array_type->getLength())
       bytes = size;
 
-    SymbolFile *symbol_file = m_ast.GetSymbolFile();
+    auto *symbol_file = static_cast<SymbolFilePDB *>(m_ast.GetSymbolFile());
     if (!symbol_file)
       return nullptr;
 
     // If array rank > 0, PDB gives the element type at N=0. So element type
     // will parsed in the order N=0, N=1,..., N=rank sequentially.
-    lldb_private::Type *element_type = symbol_file->ResolveTypeUID(element_uid);
+    lldb_private::Type *element_type = symbol_file->ResolveTypeUID(element_uid, lang);
     if (!element_type)
       return nullptr;
 
@@ -774,19 +770,19 @@ lldb::TypeSP PDBASTParser::CreateLLDBTypeFromPDBType(const PDBSymbol &type, Lang
     auto *pointer_type = llvm::dyn_cast<PDBSymbolTypePointer>(&type);
     assert(pointer_type);
 
-    SymbolFile *symbol_file = m_ast.GetSymbolFile();
+    auto *symbol_file = static_cast<SymbolFilePDB *>(m_ast.GetSymbolFile());
     if (!symbol_file)
       return nullptr;
 
-    Type *pointee_type = symbol_file->ResolveTypeUID(
-        pointer_type->getPointeeType()->getSymIndexId());
+    auto pdb_pointer_type = pointer_type->getPointeeType()->getSymIndexId();
+    Type *pointee_type = symbol_file->ResolveTypeUID(pdb_pointer_type, lang);
     if (!pointee_type)
       return nullptr;
 
     if (pointer_type->isPointerToDataMember() ||
         pointer_type->isPointerToMemberFunction()) {
       auto class_parent_uid = pointer_type->getRawSymbol().getClassParentId();
-      auto class_parent_type = symbol_file->ResolveTypeUID(class_parent_uid);
+      auto class_parent_type = symbol_file->ResolveTypeUID(class_parent_uid, lang);
       assert(class_parent_type);
 
       CompilerType pointer_ast_type;
