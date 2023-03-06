@@ -81,26 +81,30 @@ private:
 
   bool AddEnumValue(lldb_private::CompilerType enum_type,
                     const llvm::pdb::PDBSymbolData &data);
-  bool CompleteTypeFromUDT(lldb_private::SymbolFile &symbol_file,
+  bool CompleteTypeFromUDT(SymbolFilePDB &symbol_file,
                            lldb_private::CompilerType &compiler_type,
                            llvm::pdb::PDBSymbolTypeUDT &udt);
   void
-  AddRecordMembers(lldb_private::SymbolFile &symbol_file,
+  AddRecordMembers(SymbolFilePDB &symbol_file,
                    lldb_private::CompilerType &record_type,
                    PDBDataSymbolEnumerator &members_enum,
-                   lldb_private::ClangASTImporter::LayoutInfo &layout_info);
+                   lldb_private::ClangASTImporter::LayoutInfo &layout_info,
+                   lldb::LanguageType lang);
   void
-  AddRecordBases(lldb_private::SymbolFile &symbol_file,
+  AddRecordBases(SymbolFilePDB &symbol_file,
                  lldb_private::CompilerType &record_type, int record_kind,
                  PDBBaseClassSymbolEnumerator &bases_enum,
-                 lldb_private::ClangASTImporter::LayoutInfo &layout_info) const;
-  void AddRecordMethods(lldb_private::SymbolFile &symbol_file,
+                 lldb_private::ClangASTImporter::LayoutInfo &layout_info,
+                 lldb::LanguageType lang) const;
+  void AddRecordMethods(SymbolFilePDB &symbol_file,
                         lldb_private::CompilerType &record_type,
-                        PDBFuncSymbolEnumerator &methods_enum);
+                        PDBFuncSymbolEnumerator &methods_enum,
+                        lldb::LanguageType lang);
   clang::CXXMethodDecl *
-  AddRecordMethod(lldb_private::SymbolFile &symbol_file,
+  AddRecordMethod(SymbolFilePDB &symbol_file,
                   lldb_private::CompilerType &record_type,
-                  const llvm::pdb::PDBSymbolFunc &method) const;
+                  const llvm::pdb::PDBSymbolFunc &method,
+                  lldb::LanguageType lang) const;
 
   lldb_private::TypeSystemClang &m_ast;
   lldb_private::ClangASTImporter m_ast_importer;
