@@ -1600,7 +1600,7 @@ bool SymbolFileDWARF::CompleteType(CompilerType &compiler_type) {
     // Once we start resolving this type, remove it from the forward
     // declaration map in case anyone child members or other types require this
     // type to get resolved. The type will get resolved when all of the calls
-    // to SymbolFileDWARF::ResolveClangOpaqueTypeDefinition are done.
+    // to CompleteTypeFromDWARF() are done.
     GetForwardDeclClangTypeToDie().erase(die_it);
 
     Type *type = GetDIEToType().lookup(dwarf_die.GetDIE());
