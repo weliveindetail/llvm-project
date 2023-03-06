@@ -438,22 +438,25 @@ lldb::TypeSP PDBASTParser::CreateLLDBTypeFromPDBType(const PDBSymbol &type, Lang
           lang, &metadata);
       assert(clang_type.IsValid());
 
-
       clang::NamedDecl *record_decl;
       if (lang == eLanguageTypeObjC) {
         record_decl = m_ast.GetAsObjCInterfaceDecl(clang_type);
       } else {
         record_decl = m_ast.GetAsCXXRecordDecl(clang_type.GetOpaqueQualType());
+        auto *inheritance_attr = clang::MSInheritanceAttr::CreateImplicit(
+            m_ast.getASTContext(), GetMSInheritance(*udt));
+        record_decl->addAttr(inheritance_attr);
       }
 
       assert(record_decl);
       m_uid_to_decl[type.getSymIndexId()] = record_decl;
 
-      auto inheritance_attr = clang::MSInheritanceAttr::CreateImplicit(
-          m_ast.getASTContext(), GetMSInheritance(*udt));
-      record_decl->addAttr(inheritance_attr);
-
-      TypeSystemClang::StartTagDeclarationDefinition(clang_type);
+      // Start the definition if the class is not objective C since the
+      // underlying decls respond to isCompleteDefinition(). Objective
+      // C decls don't respond to isCompleteDefinition() so we can't
+      // start the declaration definition right away.
+      if (lang != eLanguageTypeObjC)
+        TypeSystemClang::StartTagDeclarationDefinition(clang_type);
 
       auto children = udt->findAllChildren();
       if (!children || children->getChildCount() == 0) {
