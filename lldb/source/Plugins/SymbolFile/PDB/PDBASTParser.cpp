@@ -24,6 +24,7 @@
 #include "lldb/Symbol/SymbolFile.h"
 #include "lldb/Symbol/TypeMap.h"
 #include "lldb/Symbol/TypeSystem.h"
+#include "lldb/Target/Language.h"
 #include "lldb/Utility/LLDBLog.h"
 #include "llvm/DebugInfo/PDB/ConcreteSymbolEnumerator.h"
 #include "llvm/DebugInfo/PDB/IPDBLineNumber.h"
@@ -405,7 +406,7 @@ lldb::TypeSP PDBASTParser::CreateLLDBTypeFromPDBType(const PDBSymbol &type, Lang
       return nullptr;
 
     if (log)
-      LLDB_LOG(log, "UDT type:");
+      LLDB_LOG(log, "UDT type '{0}':", udt->getName());
 
     auto decl_context = GetDeclContextContainingSymbol(type);
 
@@ -1273,10 +1274,17 @@ bool PDBASTParser::CompleteTypeFromUDT(
   if (TypeSystemClang::IsObjCObjectOrInterfaceType(compiler_type))
     lang = eLanguageTypeObjC;
 
+  Log *log = GetLog(PDBLog::Lookups);
+  LLDB_LOG(log, "CompleteTypeFromUDT '{0}' ({1} language):",
+           udt.getName().c_str(),
+           lldb_private::Language::GetNameForLanguageType(lang));
+
   auto nested_enums = udt.findAllChildren<PDBSymbolTypeUDT>();
   if (nested_enums)
-    while (auto nested = nested_enums->getNext())
+    while (auto nested = nested_enums->getNext()) {
+      LLDB_LOG(log, "  Resolving nested UDT '{0}'", nested->getName().c_str());
       symbol_file.ResolveTypeUID(nested->getSymIndexId(), lang);
+    }
 
   auto bases_enum = udt.findAllChildren<PDBSymbolTypeBaseClass>();
   if (bases_enum)
@@ -1312,11 +1320,13 @@ void PDBASTParser::AddRecordMembers(
     PDBDataSymbolEnumerator &members_enum,
     lldb_private::ClangASTImporter::LayoutInfo &layout_info,
     LanguageType lang) {
+  Log *log = GetLog(PDBLog::Lookups);
   while (auto member = members_enum.getNext()) {
     if (member->isCompilerGenerated())
       continue;
 
     auto member_name = member->getName();
+    LLDB_LOG(log, "  Resolving member '{0}'", member_name.c_str());
 
     auto member_type = symbol_file.ResolveTypeUID(member->getTypeId(), lang);
     if (!member_type)
@@ -1427,12 +1437,14 @@ void PDBASTParser::AddRecordBases(
     lldb_private::ClangASTImporter::LayoutInfo &layout_info,
     LanguageType lang) const {
   std::vector<std::unique_ptr<clang::CXXBaseSpecifier>> base_classes;
+  Log *log = GetLog(PDBLog::Lookups);
 
   while (auto base = bases_enum.getNext()) {
     auto *base_type = symbol_file.ResolveTypeUID(base->getTypeId(), lang);
     if (!base_type)
       continue;
 
+    LLDB_LOG(log, "  Resolving base class '{0}'", base->getName().c_str());
     auto base_comp_type = base_type->GetFullCompilerType();
     if (!base_comp_type.GetCompleteType()) {
       symbol_file.GetObjectFile()->GetModule()->ReportError(
@@ -1504,6 +1516,9 @@ PDBASTParser::AddRecordMethod(SymbolFilePDB &symbol_file,
   // MSVC specific __vecDelDtor.
   if (!method_type)
     return nullptr;
+
+  if (Log *log = GetLog(PDBLog::Lookups))
+    LLDB_LOG(log, "  Resolving method '{0}'", name.c_str());
 
   CompilerType method_comp_type = method_type->GetFullCompilerType();
   if (!method_comp_type.GetCompleteType()) {
