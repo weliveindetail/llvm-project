@@ -854,7 +854,11 @@ bool PDBASTParser::CompleteTypeFromPDB(
 
   clang::NamedDecl *lookup_decl;
   if (TypeSystemClang::IsObjCObjectOrInterfaceType(compiler_type)) {
-    lookup_decl = m_ast.GetAsObjCInterfaceDecl(compiler_type);
+    // Start definition now that we resolve the entire type info
+    clang::ObjCInterfaceDecl *decl = m_ast.GetAsObjCInterfaceDecl(compiler_type);
+    assert(!decl->hasDefinition() && "Definition must not have started");
+    TypeSystemClang::StartTagDeclarationDefinition(compiler_type);
+    lookup_decl = decl;
   } else {
     lookup_decl = m_ast.GetAsCXXRecordDecl(compiler_type.GetOpaqueQualType());
   }
