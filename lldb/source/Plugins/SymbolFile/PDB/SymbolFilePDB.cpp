@@ -574,16 +574,14 @@ SymbolFilePDB::ParseVariablesForContext(const lldb_private::SymbolContext &sc) {
   return num_added;
 }
 
-bool SymbolFilePDB::hasBaseClassNSObject(const PDBSymbolTypeUDT &pdb_udt) const {
+bool SymbolFilePDB::isaNSObject(const PDBSymbolTypeUDT &pdb_udt) const {
+  if (pdb_udt.getName() == "NSObject")
+    return true; // Found NSObject
+
   auto bases_up = pdb_udt.findAllChildren<PDBSymbolTypeBaseClass>();
   std::unique_ptr<llvm::pdb::PDBSymbolTypeBaseClass> pdb_base_up = bases_up->getNext();
   if (!pdb_base_up)
     return false; // No further bases classes
-
-  if (pdb_base_up->getName() == "NSObject") {
-    assert(!bases_up->getNext() && "ObjC has single inheritance only");
-    return true; // Found NSObject base class
-  }
 
   if (bases_up->getNext())
     return false; // ObjC has single inheritance only (this must be C/C++)
@@ -594,7 +592,7 @@ bool SymbolFilePDB::hasBaseClassNSObject(const PDBSymbolTypeUDT &pdb_udt) const 
   if (!pdb_base_udt_up)
     return false; // Error
 
-  return hasBaseClassNSObject(*pdb_base_udt_up);
+  return isaNSObject(*pdb_base_udt_up);
 }
 
 lldb::CompUnitSP SymbolFilePDB::getCompileUnitByUID(lldb::user_id_t sym_uid) {
