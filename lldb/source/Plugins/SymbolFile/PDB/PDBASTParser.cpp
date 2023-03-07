@@ -1444,8 +1444,13 @@ void PDBASTParser::AddRecordBases(
         TypeSystemClang::CompleteTagDeclarationDefinition(base_comp_type);
     }
 
-    auto access = TranslateMemberAccess(base->getAccess());
+    if (TypeSystemClang::IsObjCObjectOrInterfaceType(base_comp_type)) {
+      m_ast.SetObjCSuperClass(record_type, base_comp_type);
+      assert(bases_enum.getNext() == nullptr && "No multiple inheritance");
+      return;
+    }
 
+    auto access = TranslateMemberAccess(base->getAccess());
     auto is_virtual = base->isVirtualBaseClass();
 
     std::unique_ptr<clang::CXXBaseSpecifier> base_spec =
