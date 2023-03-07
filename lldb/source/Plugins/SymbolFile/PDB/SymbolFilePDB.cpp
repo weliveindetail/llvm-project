@@ -586,13 +586,13 @@ bool SymbolFilePDB::isaNSObject(const PDBSymbolTypeUDT &pdb_udt) const {
   if (bases_up->getNext())
     return false; // ObjC has single inheritance only (this must be C/C++)
 
-  user_id_t base_uid = pdb_base_up->getSymIndexId();
-  auto pdb_base_udt_up =
-      m_session_up->getConcreteSymbolById<PDBSymbolTypeUDT>(base_uid);
-  if (!pdb_base_udt_up)
-    return false; // Error
+  user_id_t base_uid = pdb_base_up->getRawSymbol().getTypeId();
+  std::unique_ptr<PDBSymbol> pdb_base_raw_up = m_session_up->getSymbolById(base_uid);
+  if (pdb_base_raw_up->getSymTag() != PDB_SymType::UDT)
+    return false; // Error: base class is not a user-defined type
 
-  return isaNSObject(*pdb_base_udt_up);
+  auto *pdb_base_udt = llvm::dyn_cast<PDBSymbolTypeUDT>(pdb_base_raw_up.get());
+  return isaNSObject(*pdb_base_udt);
 }
 
 lldb::CompUnitSP SymbolFilePDB::getCompileUnitByUID(lldb::user_id_t sym_uid) {
