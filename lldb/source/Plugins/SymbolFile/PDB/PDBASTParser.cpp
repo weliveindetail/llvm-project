@@ -406,7 +406,7 @@ lldb::TypeSP PDBASTParser::CreateLLDBTypeFromPDBType(const PDBSymbol &type, Lang
       return nullptr;
 
     if (log)
-      LLDB_LOG(log, "UDT type '{0}':", udt->getName());
+      LLDB_LOG(log, "UDT type '{0}' ({1:x}):", udt->getName(), udt->getSymIndexId());
 
     auto decl_context = GetDeclContextContainingSymbol(type);
 
@@ -433,6 +433,11 @@ lldb::TypeSP PDBASTParser::CreateLLDBTypeFromPDBType(const PDBSymbol &type, Lang
       ClangASTMetadata metadata;
       metadata.SetUserID(type.getSymIndexId());
       metadata.SetIsDynamicCXXType(false);
+
+      LanguageType lang = eLanguageTypeC_plus_plus;
+      auto *symbol_file = static_cast<SymbolFilePDB *>(m_ast.GetSymbolFile());
+      if (symbol_file->hasBaseClassNSObject(*udt))
+        lang = eLanguageTypeObjC;
 
       clang_type = m_ast.CreateRecordType(
           decl_context, OptionalClangModuleID(), access, name, tag_type_kind,

@@ -174,6 +174,8 @@ public:
   uint32_t GetCompilandId(const llvm::pdb::PDBSymbolData &data);
   lldb::CompUnitSP getCompileUnitByUID(lldb::user_id_t sym_uid);
 
+  bool hasBaseClassNSObject(const llvm::pdb::PDBSymbolTypeUDT &udt) const;
+
 private:
   struct SecContribInfo {
     uint32_t Offset;

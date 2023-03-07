@@ -48,6 +48,7 @@
 #include "llvm/DebugInfo/PDB/PDBSymbolFuncDebugEnd.h"
 #include "llvm/DebugInfo/PDB/PDBSymbolFuncDebugStart.h"
 #include "llvm/DebugInfo/PDB/PDBSymbolPublicSymbol.h"
+#include "llvm/DebugInfo/PDB/PDBSymbolTypeBaseClass.h"
 #include "llvm/DebugInfo/PDB/PDBSymbolTypeBuiltin.h"
 #include "llvm/DebugInfo/PDB/PDBSymbolTypeEnum.h"
 #include "llvm/DebugInfo/PDB/PDBSymbolTypeFunctionSig.h"
@@ -571,6 +572,29 @@ SymbolFilePDB::ParseVariablesForContext(const lldb_private::SymbolContext &sc) {
   }
 
   return num_added;
+}
+
+bool SymbolFilePDB::hasBaseClassNSObject(const PDBSymbolTypeUDT &pdb_udt) const {
+  auto bases_up = pdb_udt.findAllChildren<PDBSymbolTypeBaseClass>();
+  std::unique_ptr<llvm::pdb::PDBSymbolTypeBaseClass> pdb_base_up = bases_up->getNext();
+  if (!pdb_base_up)
+    return false; // No further bases classes
+
+  if (pdb_base_up->getName() == "NSObject") {
+    assert(!bases_up->getNext() && "ObjC has single inheritance only");
+    return true; // Found NSObject base class
+  }
+
+  if (bases_up->getNext())
+    return false; // ObjC has single inheritance only (this must be C/C++)
+
+  user_id_t base_uid = pdb_base_up->getSymIndexId();
+  auto pdb_base_udt_up =
+      m_session_up->getConcreteSymbolById<PDBSymbolTypeUDT>(base_uid);
+  if (!pdb_base_udt_up)
+    return false; // Error
+
+  return hasBaseClassNSObject(*pdb_base_udt_up);
 }
 
 lldb::CompUnitSP SymbolFilePDB::getCompileUnitByUID(lldb::user_id_t sym_uid) {
