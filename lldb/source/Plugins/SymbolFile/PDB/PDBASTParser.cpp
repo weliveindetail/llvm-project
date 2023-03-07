@@ -438,14 +438,18 @@ lldb::TypeSP PDBASTParser::CreateLLDBTypeFromPDBType(const PDBSymbol &type, Lang
           lang, &metadata);
       assert(clang_type.IsValid());
 
-      // Both, parser and AST importer cache all declarations as CXXRecordDecls
-      clang::CXXRecordDecl *cached_decl =
-          m_ast.GetAsCXXRecordDecl(clang_type.GetOpaqueQualType());
-      assert(cached_decl && "CXXRecordDecl cast failed");
+      clang::NamedDecl *cached_decl;
+      if (lang == eLanguageTypeObjC || lang == eLanguageTypeObjC_plus_plus) {
+        cached_decl = m_ast.GetAsObjCInterfaceDecl(clang_type);
+        assert(cached_decl && "Expecting ObjCInterfaceDecl");
+      } else {
+        cached_decl = m_ast.GetAsCXXRecordDecl(clang_type.GetOpaqueQualType());
+        assert(cached_decl && "Expecting CXXRecordDecl");
+      }
       m_uid_to_decl[type.getSymIndexId()] = cached_decl;
 
       if (lang != eLanguageTypeObjC) {
-        // TODO: Should we add this to ObjC declarations as well?
+        // ObjC has single inheritance only. No attribute necessary.
         cached_decl->addAttr(
             clang::MSInheritanceAttr::CreateImplicit(
                 m_ast.getASTContext(), GetMSInheritance(*udt)));
