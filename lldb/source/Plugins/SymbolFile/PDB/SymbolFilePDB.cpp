@@ -574,9 +574,11 @@ SymbolFilePDB::ParseVariablesForContext(const lldb_private::SymbolContext &sc) {
   return num_added;
 }
 
-bool SymbolFilePDB::isaNSObject(const PDBSymbolTypeUDT &pdb_udt) const {
+bool SymbolFilePDB::isaNSObjectOrNSProxy(const PDBSymbolTypeUDT &pdb_udt) const {
   if (pdb_udt.getName() == "NSObject")
-    return true; // Found NSObject
+    return true;
+  if (pdb_udt.getName() == "NSProxy")
+    return true;
 
   auto bases_up = pdb_udt.findAllChildren<PDBSymbolTypeBaseClass>();
   std::unique_ptr<llvm::pdb::PDBSymbolTypeBaseClass> pdb_base_up = bases_up->getNext();
@@ -592,7 +594,7 @@ bool SymbolFilePDB::isaNSObject(const PDBSymbolTypeUDT &pdb_udt) const {
     return false; // Error: base class is not a user-defined type
 
   auto *pdb_base_udt = llvm::dyn_cast<PDBSymbolTypeUDT>(pdb_base_raw_up.get());
-  return isaNSObject(*pdb_base_udt);
+  return isaNSObjectOrNSProxy(*pdb_base_udt);
 }
 
 lldb::CompUnitSP SymbolFilePDB::getCompileUnitByUID(lldb::user_id_t sym_uid) {
