@@ -193,8 +193,8 @@ static ConstString GetPDBBuiltinTypeName(const PDBSymbolTypeBuiltin &pdb_type,
   return compiler_type.GetTypeName();
 }
 
-static bool GetDeclarationForSymbol(const PDBSymbol &symbol,
-                                    Declaration &decl) {
+static bool AddSourceLocationForSymbolDecl(const PDBSymbol &symbol,
+                                           Declaration &decl) {
   auto &raw_sym = symbol.getRawSymbol();
   auto first_line_up = raw_sym.getSrcLineOnTypeDefn();
 
@@ -410,15 +410,27 @@ lldb::TypeSP PDBASTParser::CreateLLDBTypeFromPDBType(const PDBSymbol &type, Lang
 
     auto decl_context = GetDeclContextContainingSymbol(type);
 
+    // PDB has no attribute to encode the language per symbol. We can assume
+    // all ObjCInterfaceDecls to derive from either NSObject or NSProxy.
+    LanguageType lang = eLanguageTypeC_plus_plus;
+    auto *symbol_file = static_cast<SymbolFilePDB *>(m_ast.GetSymbolFile());
+    if (symbol_file->isaNSObjectOrNSProxy(*udt))
+      lang = eLanguageTypeObjC;
+
     // Check if such an UDT already exists in the current context.
     // This may occur with const or volatile types. There are separate type
     // symbols in PDB for types with const or volatile modifiers, but we need
     // to create only one declaration for them all.
-    Type::ResolveState type_resolve_state;
-    CompilerType clang_type =
-        m_ast.GetTypeForIdentifier<clang::CXXRecordDecl>(ConstString(name),
-                                                         decl_context);
+    CompilerType clang_type;
+    if (lang == eLanguageTypeObjC || lang == eLanguageTypeObjC_plus_plus) {
+        clang_type = m_ast.GetTypeForIdentifier<clang::ObjCInterfaceDecl>(ConstString(name),
+                                                                          decl_context);
+    } else {
+        clang_type = m_ast.GetTypeForIdentifier<clang::CXXRecordDecl>(ConstString(name),
+                                                                      decl_context);
+    }
 
+    Type::ResolveState type_resolve_state;
     if (!clang_type.IsValid()) {
       auto access = GetAccessibilityForUdt(*udt);
 
@@ -427,11 +439,6 @@ lldb::TypeSP PDBASTParser::CreateLLDBTypeFromPDBType(const PDBSymbol &type, Lang
       ClangASTMetadata metadata;
       metadata.SetUserID(type.getSymIndexId());
       metadata.SetIsDynamicCXXType(false);
-
-      LanguageType lang = eLanguageTypeC_plus_plus;
-      auto *symbol_file = static_cast<SymbolFilePDB *>(m_ast.GetSymbolFile());
-      if (symbol_file->isaNSObject(*udt))
-        lang = eLanguageTypeObjC;
 
       clang_type = m_ast.CreateRecordType(
           decl_context, OptionalClangModuleID(), access, name, tag_type_kind,
@@ -493,7 +500,7 @@ lldb::TypeSP PDBASTParser::CreateLLDBTypeFromPDBType(const PDBSymbol &type, Lang
     if (log)
       clang_type.dump();
 
-    GetDeclarationForSymbol(type, decl);
+    AddSourceLocationForSymbolDecl(type, decl);
     return m_ast.GetSymbolFile()->MakeType(
         type.getSymIndexId(), ConstString(name), udt->getLength(), nullptr,
         LLDB_INVALID_UID, lldb_private::Type::eEncodingIsUID, decl, clang_type,
@@ -562,7 +569,7 @@ lldb::TypeSP PDBASTParser::CreateLLDBTypeFromPDBType(const PDBSymbol &type, Lang
     if (enum_type->isVolatileType())
       ast_enum = ast_enum.AddVolatileModifier();
 
-    GetDeclarationForSymbol(type, decl);
+    AddSourceLocationForSymbolDecl(type, decl);
     return m_ast.GetSymbolFile()->MakeType(
         type.getSymIndexId(), ConstString(name), bytes, nullptr,
         LLDB_INVALID_UID, lldb_private::Type::eEncodingIsUID, decl, ast_enum,
@@ -614,7 +621,7 @@ lldb::TypeSP PDBASTParser::CreateLLDBTypeFromPDBType(const PDBSymbol &type, Lang
     if (type_def->isVolatileType())
       ast_typedef = ast_typedef.AddVolatileModifier();
 
-    GetDeclarationForSymbol(type, decl);
+    AddSourceLocationForSymbolDecl(type, decl);
     std::optional<uint64_t> size;
     if (type_def->getLength())
       size = type_def->getLength();
@@ -703,7 +710,7 @@ lldb::TypeSP PDBASTParser::CreateLLDBTypeFromPDBType(const PDBSymbol &type, Lang
       func_sig_ast_type.dump();
     }
 
-    GetDeclarationForSymbol(type, decl);
+    AddSourceLocationForSymbolDecl(type, decl);
     return m_ast.GetSymbolFile()->MakeType(
         type.getSymIndexId(), ConstString(name), std::nullopt, nullptr,
         LLDB_INVALID_UID, lldb_private::Type::eEncodingIsUID, decl,
