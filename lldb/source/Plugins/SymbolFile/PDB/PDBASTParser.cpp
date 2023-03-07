@@ -372,7 +372,7 @@ PDBASTParser::~PDBASTParser() = default;
 
 // DebugInfoASTParser interface
 
-lldb::TypeSP PDBASTParser::CreateLLDBTypeFromPDBType(const PDBSymbol &type, LanguageType lang) {
+lldb::TypeSP PDBASTParser::CreateLLDBTypeFromPDBType(const PDBSymbol &type, LanguageType cu_lang) {
   Declaration decl;
   Log *log = GetLog(PDBLog::Lookups);
   switch (type.getSymTag()) {
@@ -381,7 +381,7 @@ lldb::TypeSP PDBASTParser::CreateLLDBTypeFromPDBType(const PDBSymbol &type, Lang
     if (!symbol_file)
       return nullptr;
 
-    auto ty = symbol_file->ResolveTypeUID(type.getRawSymbol().getTypeId(), lang);
+    auto ty = symbol_file->ResolveTypeUID(type.getRawSymbol().getTypeId(), cu_lang);
     return ty ? ty->shared_from_this() : nullptr;
   } break;
   case PDB_SymType::UDT: {
@@ -415,16 +415,10 @@ lldb::TypeSP PDBASTParser::CreateLLDBTypeFromPDBType(const PDBSymbol &type, Lang
     // symbols in PDB for types with const or volatile modifiers, but we need
     // to create only one declaration for them all.
     Type::ResolveState type_resolve_state;
-    CompilerType clang_type;
-    switch (lang) {
-      case eLanguageTypeObjC:
-        clang_type = m_ast.GetTypeForIdentifier<clang::ObjCInterfaceDecl>(
-            ConstString(name), decl_context);
-        break;
-      default:
-        clang_type = m_ast.GetTypeForIdentifier<clang::CXXRecordDecl>(
-            ConstString(name), decl_context);
-    }
+    CompilerType clang_type =
+        m_ast.GetTypeForIdentifier<clang::CXXRecordDecl>(ConstString(name),
+                                                         decl_context);
+
     if (!clang_type.IsValid()) {
       auto access = GetAccessibilityForUdt(*udt);
 
@@ -436,7 +430,7 @@ lldb::TypeSP PDBASTParser::CreateLLDBTypeFromPDBType(const PDBSymbol &type, Lang
 
       LanguageType lang = eLanguageTypeC_plus_plus;
       auto *symbol_file = static_cast<SymbolFilePDB *>(m_ast.GetSymbolFile());
-      if (symbol_file->hasBaseClassNSObject(*udt))
+      if (symbol_file->isaNSObject(*udt))
         lang = eLanguageTypeObjC;
 
       clang_type = m_ast.CreateRecordType(
@@ -444,25 +438,24 @@ lldb::TypeSP PDBASTParser::CreateLLDBTypeFromPDBType(const PDBSymbol &type, Lang
           lang, &metadata);
       assert(clang_type.IsValid());
 
-      clang::NamedDecl *record_decl;
-      if (lang == eLanguageTypeObjC) {
-        record_decl = m_ast.GetAsObjCInterfaceDecl(clang_type);
-      } else {
-        record_decl = m_ast.GetAsCXXRecordDecl(clang_type.GetOpaqueQualType());
-        auto *inheritance_attr = clang::MSInheritanceAttr::CreateImplicit(
-            m_ast.getASTContext(), GetMSInheritance(*udt));
-        record_decl->addAttr(inheritance_attr);
-      }
+      // Both, parser and AST importer cache all declarations as CXXRecordDecls
+      clang::CXXRecordDecl *cached_decl =
+          m_ast.GetAsCXXRecordDecl(clang_type.GetOpaqueQualType());
+      assert(cached_decl && "CXXRecordDecl cast failed");
+      m_uid_to_decl[type.getSymIndexId()] = cached_decl;
 
-      assert(record_decl);
-      m_uid_to_decl[type.getSymIndexId()] = record_decl;
+      if (lang != eLanguageTypeObjC) {
+        // TODO: Should we add this to ObjC declarations as well?
+        cached_decl->addAttr(
+            clang::MSInheritanceAttr::CreateImplicit(
+                m_ast.getASTContext(), GetMSInheritance(*udt)));
 
-      // Start the definition if the class is not objective C since the
-      // underlying decls respond to isCompleteDefinition(). Objective
-      // C decls don't respond to isCompleteDefinition() so we can't
-      // start the declaration definition right away.
-      if (lang != eLanguageTypeObjC)
+        // Start the definition if the class is not objective C since the
+        // underlying decls respond to isCompleteDefinition(). Objective
+        // C decls don't respond to isCompleteDefinition() so we can't
+        // start the declaration definition right away.
         TypeSystemClang::StartTagDeclarationDefinition(clang_type);
+      }
 
       auto children = udt->findAllChildren();
       if (!children || children->getChildCount() == 0) {
@@ -477,7 +470,7 @@ lldb::TypeSP PDBASTParser::CreateLLDBTypeFromPDBType(const PDBSymbol &type, Lang
       } else {
         // Add the type to the forward declarations. It will help us to avoid
         // an endless recursion in CompleteTypeFromUdt function.
-        m_forward_decl_to_uid[record_decl] = type.getSymIndexId();
+        m_forward_decl_to_uid[cached_decl] = type.getSymIndexId();
 
         TypeSystemClang::SetHasExternalStorage(clang_type.GetOpaqueQualType(),
                                                true);
@@ -580,7 +573,7 @@ lldb::TypeSP PDBASTParser::CreateLLDBTypeFromPDBType(const PDBSymbol &type, Lang
       return nullptr;
 
     lldb_private::Type *target_type =
-        symbol_file->ResolveTypeUID(type_def->getTypeId(), lang);
+        symbol_file->ResolveTypeUID(type_def->getTypeId(), cu_lang);
     if (!target_type)
       return nullptr;
 
@@ -666,7 +659,7 @@ lldb::TypeSP PDBASTParser::CreateLLDBTypeFromPDBType(const PDBSymbol &type, Lang
         break;
 
       lldb_private::Type *arg_type =
-          symbol_file->ResolveTypeUID(arg->getSymIndexId(), lang);
+          symbol_file->ResolveTypeUID(arg->getSymIndexId(), cu_lang);
       // If there's some error looking up one of the dependent types of this
       // function signature, bail.
       if (!arg_type)
@@ -682,7 +675,7 @@ lldb::TypeSP PDBASTParser::CreateLLDBTypeFromPDBType(const PDBSymbol &type, Lang
 
     auto pdb_return_type = func_sig->getReturnType();
     lldb_private::Type *return_type =
-        symbol_file->ResolveTypeUID(pdb_return_type->getSymIndexId(), lang);
+        symbol_file->ResolveTypeUID(pdb_return_type->getSymIndexId(), cu_lang);
     // If there's some error looking up one of the dependent types of this
     // function signature, bail.
     if (!return_type)
@@ -727,7 +720,7 @@ lldb::TypeSP PDBASTParser::CreateLLDBTypeFromPDBType(const PDBSymbol &type, Lang
 
     // If array rank > 0, PDB gives the element type at N=0. So element type
     // will parsed in the order N=0, N=1,..., N=rank sequentially.
-    lldb_private::Type *element_type = symbol_file->ResolveTypeUID(element_uid, lang);
+    lldb_private::Type *element_type = symbol_file->ResolveTypeUID(element_uid, cu_lang);
     if (!element_type)
       return nullptr;
 
@@ -791,14 +784,14 @@ lldb::TypeSP PDBASTParser::CreateLLDBTypeFromPDBType(const PDBSymbol &type, Lang
       return nullptr;
 
     auto pdb_pointer_type = pointer_type->getPointeeType()->getSymIndexId();
-    Type *pointee_type = symbol_file->ResolveTypeUID(pdb_pointer_type, lang);
+    Type *pointee_type = symbol_file->ResolveTypeUID(pdb_pointer_type, cu_lang);
     if (!pointee_type)
       return nullptr;
 
     if (pointer_type->isPointerToDataMember() ||
         pointer_type->isPointerToMemberFunction()) {
       auto class_parent_uid = pointer_type->getRawSymbol().getClassParentId();
-      auto class_parent_type = symbol_file->ResolveTypeUID(class_parent_uid, lang);
+      auto class_parent_type = symbol_file->ResolveTypeUID(class_parent_uid, cu_lang);
       assert(class_parent_type);
 
       CompilerType pointer_ast_type;
