@@ -603,16 +603,17 @@ bool SymbolFilePDB::IsaObjCSpecialMemberId(user_id_t sym_uid) const {
     return false; // id member is encoded as UDT
 
   auto *pdb_sym_udt = llvm::dyn_cast<PDBSymbolTypeUDT>(pdb_sym_up.get());
-  if (pdb_sym_udt->getName() != "id")
+  if (pdb_sym_udt->getName() != "id" &&
+      pdb_sym_udt->getName() != "objc_object")
     return false;
 
-  std::unique_ptr<PDBSymbol> pdb_parent_up = pdb_sym_udt->getClassParent();
-  if (pdb_parent_up->getSymTag() != PDB_SymType::UDT)
-    return false;
-
-  auto *pdb_parent_udt = llvm::dyn_cast<PDBSymbolTypeUDT>(pdb_parent_up.get());
-  if (!IsaNSObjectOrNSProxy(*pdb_parent_udt))
-    return false;
+  // FIXME: Make sure the owner structure is an ObjCInterfaceDecl
+  //  std::unique_ptr<PDBSymbol> pdb_parent_up = pdb_sym_udt->getClassParent();
+  //  if (!pdb_parent_up)
+  //    return false;
+  //  auto *pdb_parent_udt = llvm::dyn_cast<PDBSymbolTypeUDT>(pdb_parent_up.get());
+  //  if (!IsaNSObjectOrNSProxy(*pdb_parent_udt))
+  //    return false;
 
   return true;
 }
