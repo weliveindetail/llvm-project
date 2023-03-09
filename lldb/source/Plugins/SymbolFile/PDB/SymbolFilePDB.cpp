@@ -607,14 +607,20 @@ bool SymbolFilePDB::IsObjCBuiltinTypeId(user_id_t sym_uid) const {
       pdb_sym_udt->getName() != "objc_object")
     return false;
 
-  // FIXME: Make sure the owner structure is an ObjCInterfaceDecl
-  //  std::unique_ptr<PDBSymbol> pdb_parent_up = pdb_sym_udt->getClassParent();
-  //  if (!pdb_parent_up)
-  //    return false;
-  //  auto *pdb_parent_udt = llvm::dyn_cast<PDBSymbolTypeUDT>(pdb_parent_up.get());
-  //  if (!IsaNSObjectOrNSProxy(*pdb_parent_udt))
-  //    return false;
+  // FIXME: Make sure this is a ObjCInterfaceDecl member
+  return true;
+}
 
+bool SymbolFilePDB::IsObjCBuiltinTypeSel(user_id_t sym_uid) const {
+  std::unique_ptr<PDBSymbol> pdb_sym_up = m_session_up->getSymbolById(sym_uid);
+  if (pdb_sym_up->getSymTag() != PDB_SymType::UDT)
+    return false;
+
+  auto *pdb_sym_udt = llvm::dyn_cast<PDBSymbolTypeUDT>(pdb_sym_up.get());
+  if (pdb_sym_udt->getName() != "objc_selector")
+    return false;
+
+  // FIXME: Make sure this is a ObjCInterfaceDecl method
   return true;
 }
 

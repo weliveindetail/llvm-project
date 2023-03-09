@@ -811,6 +811,17 @@ lldb::TypeSP PDBASTParser::CreateLLDBTypeFromPDBType(const PDBSymbol &type, Lang
           lldb_private::Type::eEncodingIsUID, decl, id_type,
           lldb_private::Type::ResolveState::Full);
     }
+    if (symbol_file->IsObjCBuiltinTypeSel(pdb_pointee_type)) {
+      if (log)
+        LLDB_LOG(log, "Fixing up type {0}: ObjC built-in type `SEL`", pdb_pointee_type);
+      CompilerType id_type = m_ast.GetBasicType(eBasicTypeObjCSel);
+      AddSourceLocationForSymbolDecl(type, decl);
+      return symbol_file->MakeType(
+          pointer_type->getSymIndexId(), ConstString("SEL"),
+          pointer_type->getLength(), nullptr, pdb_pointee_type,
+          lldb_private::Type::eEncodingIsUID, decl, id_type,
+          lldb_private::Type::ResolveState::Full);
+    }
 
     Type *pointee_type = symbol_file->ResolveTypeUID(pdb_pointee_type, cu_lang);
     if (!pointee_type)
