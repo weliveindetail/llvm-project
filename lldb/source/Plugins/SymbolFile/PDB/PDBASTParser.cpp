@@ -410,7 +410,7 @@ lldb::TypeSP PDBASTParser::CreateLLDBTypeFromPDBType(const PDBSymbol &type, Lang
       return nullptr;
 
     if (log)
-      LLDB_LOG(log, "UDT type '{0}' ({1:x}):", udt->getName(), udt->getSymIndexId());
+      LLDB_LOG(log, "UDT type '{0}' ({1:x}):", udt->getName(), udt->getRawSymbol().getTypeId());
 
     auto decl_context = GetDeclContextContainingSymbol(type);
 
@@ -794,6 +794,23 @@ lldb::TypeSP PDBASTParser::CreateLLDBTypeFromPDBType(const PDBSymbol &type, Lang
     auto *pointer_type = llvm::dyn_cast<PDBSymbolTypePointer>(&type);
     assert(pointer_type);
 
+    if (cu_lang == eLanguageTypeObjC ||
+        cu_lang == eLanguageTypeObjC_plus_plus) {
+        // Clang sometimes erroneously emits id as objc_object*.  In that
+        // case we fix up the type to "id".
+        //    if (log)
+        //      dwarf->GetObjectFile()->GetModule()->LogMessage(
+        //          log,
+        //          "SymbolFileDWARF::ParseType (die = {0:x16}) {1} "
+        //          "'{2}' is 'objc_object*', which we overrode to "
+        //          "'id'.",
+        //          die.GetOffset(), die.GetTagAsCString(), die.GetName());
+        //    clang_type = m_ast.GetBasicType(eBasicTypeObjCID);
+        //    encoding_data_type = Type::eEncodingIsUID;
+        //    attrs.type.Clear();
+        //    resolve_state = Type::ResolveState::Full;
+    }
+
     auto *symbol_file = static_cast<SymbolFilePDB *>(m_ast.GetSymbolFile());
     if (!symbol_file)
       return nullptr;
@@ -1110,6 +1127,10 @@ clang::DeclContext *PDBASTParser::GetDeclContextContainingSymbol(
     const llvm::pdb::PDBSymbol &symbol) {
   auto parent = GetClassOrFunctionParent(symbol);
   while (parent) {
+    auto *log = GetLog(PDBLog::Lookups);
+      LLDB_LOG(log, "ClassOrFunctionParent of symbol '{0}' ({1}) found: '{2}' ({3})",
+               symbol.getSymIndexId(), symbol.getSymTag(),
+               parent->getSymIndexId(), parent->getSymTag());
     if (auto parent_context = GetDeclContextForSymbol(*parent))
       return parent_context;
 
@@ -1119,6 +1140,9 @@ clang::DeclContext *PDBASTParser::GetDeclContextContainingSymbol(
   // We can't find any class or function parent of the symbol. So analyze
   // the full symbol name. The symbol may be belonging to a namespace
   // or function (or even to a class if it's e.g. a static variable symbol).
+  auto *log = GetLog(PDBLog::Lookups);
+    LLDB_LOG(log, "ClassOrFunctionParent of symbol '{0}' ({1}) falling back to expensive lookup",
+            symbol.getSymIndexId(), symbol.getSymTag());
 
   // TODO: Make clang to emit full names for variables in namespaces
   // (as MSVC does)
