@@ -624,6 +624,18 @@ bool SymbolFilePDB::IsObjCBuiltinTypeSel(user_id_t sym_uid) const {
   return true;
 }
 
+lldb::LanguageType SymbolFilePDB::getCompileUnitLanguage(const PDBSymbolData &pdb_data) {
+  if (CompUnitSP cu = ParseCompileUnitForUID(GetCompilandId(pdb_data)))
+    return cu->GetLanguage();
+  return lldb::eLanguageTypeC_plus_plus; // Fall back to default instead of unknown
+}
+
+lldb::LanguageType SymbolFilePDB::getCompileUnitLanguage(const PDBSymbolFunc &pdb_func) {
+  if (CompUnitSP cu = ParseCompileUnitForUID(pdb_func.getCompilandId()))
+    return cu->GetLanguage();
+  return lldb::eLanguageTypeC_plus_plus; // Fall back to default instead of unknown
+}
+
 lldb::CompUnitSP SymbolFilePDB::getCompileUnitByUID(lldb::user_id_t sym_uid) {
   if (auto sym = m_session_up->getConcreteSymbolById<PDBSymbolData>(sym_uid))
     return ParseCompileUnitForUID(GetCompilandId(*sym));
