@@ -418,7 +418,7 @@ lldb::TypeSP PDBASTParser::CreateLLDBTypeFromPDBType(const PDBSymbol &type, Lang
     // all ObjCInterfaceDecls to derive from either NSObject or NSProxy.
     LanguageType lang = eLanguageTypeC_plus_plus;
     auto *symbol_file = static_cast<SymbolFilePDB *>(m_ast.GetSymbolFile());
-    if (symbol_file->isaNSObjectOrNSProxy(*udt))
+    if (symbol_file->IsaNSObjectOrNSProxy(*udt))
       lang = eLanguageTypeObjC;
 
     // Check if such an UDT already exists in the current context.
@@ -815,8 +815,23 @@ lldb::TypeSP PDBASTParser::CreateLLDBTypeFromPDBType(const PDBSymbol &type, Lang
     if (!symbol_file)
       return nullptr;
 
-    auto pdb_pointer_type = pointer_type->getPointeeType()->getSymIndexId();
-    Type *pointee_type = symbol_file->ResolveTypeUID(pdb_pointer_type, cu_lang);
+    auto pdb_pointee_type = pointer_type->getPointeeType()->getSymIndexId();
+    if (symbol_file->IsaObjCSpecialMemberId(pdb_pointee_type)) {
+      // Clang emits id as objc_object* and we fix it up manually to the built-in "id" type
+      if (log)
+        LLDB_LOG(log, "Fixing up type {0}: ObjC special member `id`", pdb_pointee_type);
+      CompilerType id_type = m_ast.GetBasicType(eBasicTypeObjCID);
+      CompilerType id_pointer_type = id_type.GetPointerType();
+
+      AddSourceLocationForSymbolDecl(type, decl);
+      return symbol_file->MakeType(
+          pointer_type->getSymIndexId(), ConstString("id"),
+          pointer_type->getLength(), nullptr, pdb_pointee_type,
+          lldb_private::Type::eEncodingIsUID, decl, id_pointer_type,
+          lldb_private::Type::ResolveState::Full);
+    }
+
+    Type *pointee_type = symbol_file->ResolveTypeUID(pdb_pointee_type, cu_lang);
     if (!pointee_type)
       return nullptr;
 
@@ -837,7 +852,7 @@ lldb::TypeSP PDBASTParser::CreateLLDBTypeFromPDBType(const PDBSymbol &type, Lang
         pointer_ast_type.dump();
       }
 
-      return m_ast.GetSymbolFile()->MakeType(
+      return symbol_file->MakeType(
           pointer_type->getSymIndexId(), ConstString(),
           pointer_type->getLength(), nullptr, LLDB_INVALID_UID,
           lldb_private::Type::eEncodingIsUID, decl, pointer_ast_type,
@@ -867,7 +882,7 @@ lldb::TypeSP PDBASTParser::CreateLLDBTypeFromPDBType(const PDBSymbol &type, Lang
       pointer_ast_type.dump();
     }
 
-    return m_ast.GetSymbolFile()->MakeType(
+    return symbol_file->MakeType(
         pointer_type->getSymIndexId(), ConstString(), pointer_type->getLength(),
         nullptr, LLDB_INVALID_UID, lldb_private::Type::eEncodingIsUID, decl,
         pointer_ast_type, lldb_private::Type::ResolveState::Full);

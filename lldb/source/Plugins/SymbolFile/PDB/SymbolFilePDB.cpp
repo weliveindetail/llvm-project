@@ -574,7 +574,7 @@ SymbolFilePDB::ParseVariablesForContext(const lldb_private::SymbolContext &sc) {
   return num_added;
 }
 
-bool SymbolFilePDB::isaNSObjectOrNSProxy(const PDBSymbolTypeUDT &pdb_udt) const {
+bool SymbolFilePDB::IsaNSObjectOrNSProxy(const PDBSymbolTypeUDT &pdb_udt) const {
   if (pdb_udt.getName() == "NSObject")
     return true;
   if (pdb_udt.getName() == "NSProxy")
@@ -594,7 +594,27 @@ bool SymbolFilePDB::isaNSObjectOrNSProxy(const PDBSymbolTypeUDT &pdb_udt) const 
     return false; // Error: base class is not a user-defined type
 
   auto *pdb_base_udt = llvm::dyn_cast<PDBSymbolTypeUDT>(pdb_base_raw_up.get());
-  return isaNSObjectOrNSProxy(*pdb_base_udt);
+  return IsaNSObjectOrNSProxy(*pdb_base_udt);
+}
+
+bool SymbolFilePDB::IsaObjCSpecialMemberId(user_id_t sym_uid) const {
+  std::unique_ptr<PDBSymbol> pdb_sym_up = m_session_up->getSymbolById(sym_uid);
+  if (pdb_sym_up->getSymTag() != PDB_SymType::UDT)
+    return false; // id member is encoded as UDT
+
+  auto *pdb_sym_udt = llvm::dyn_cast<PDBSymbolTypeUDT>(pdb_sym_up.get());
+  if (pdb_sym_udt->getName() != "id")
+    return false;
+
+  std::unique_ptr<PDBSymbol> pdb_parent_up = pdb_sym_udt->getClassParent();
+  if (pdb_parent_up->getSymTag() != PDB_SymType::UDT)
+    return false;
+
+  auto *pdb_parent_udt = llvm::dyn_cast<PDBSymbolTypeUDT>(pdb_parent_up.get());
+  if (!IsaNSObjectOrNSProxy(*pdb_parent_udt))
+    return false;
+
+  return true;
 }
 
 lldb::CompUnitSP SymbolFilePDB::getCompileUnitByUID(lldb::user_id_t sym_uid) {
