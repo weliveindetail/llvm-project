@@ -638,6 +638,11 @@ lldb::TypeSP PDBASTParser::CreateLLDBTypeFromPDBType(const PDBSymbol &type, Lang
   case PDB_SymType::FunctionSig: {
     std::string name;
     PDBSymbolTypeFunctionSig *func_sig = nullptr;
+
+    auto *symbol_file = static_cast<SymbolFilePDB *>(m_ast.GetSymbolFile());
+    if (!symbol_file)
+      return nullptr;
+
     if (auto pdb_func = llvm::dyn_cast<PDBSymbolFunc>(&type)) {
       if (pdb_func->isCompilerGenerated())
         return nullptr;
@@ -647,8 +652,12 @@ lldb::TypeSP PDBASTParser::CreateLLDBTypeFromPDBType(const PDBSymbol &type, Lang
         return nullptr;
       func_sig = sig.release();
       // Function type is named.
-      name = std::string(
-          MSVCUndecoratedNameParser::DropScope(pdb_func->getName()));
+      LanguageType lang = symbol_file->getCompileUnitLanguage(*pdb_func);
+      if (lang == eLanguageTypeObjC || lang == eLanguageTypeObjC_plus_plus) {
+        name = pdb_func->getName(); // e.g.: "-[Foo setAll]"
+      } else {
+        name = MSVCUndecoratedNameParser::DropScope(pdb_func->getName()).str();
+      }
     } else if (auto pdb_func_sig =
                    llvm::dyn_cast<PDBSymbolTypeFunctionSig>(&type)) {
       func_sig = const_cast<PDBSymbolTypeFunctionSig *>(pdb_func_sig);
@@ -659,10 +668,6 @@ lldb::TypeSP PDBASTParser::CreateLLDBTypeFromPDBType(const PDBSymbol &type, Lang
     auto arg_enum = func_sig->getArguments();
     uint32_t num_args = arg_enum->getChildCount();
     std::vector<CompilerType> arg_list;
-
-    auto *symbol_file = static_cast<SymbolFilePDB *>(m_ast.GetSymbolFile());
-    if (!symbol_file)
-      return nullptr;
 
     bool is_variadic = func_sig->isCVarArgs();
     // Drop last variadic argument.
@@ -936,7 +941,7 @@ bool PDBASTParser::CompleteTypeFromPDB(
 }
 
 clang::Decl *
-PDBASTParser::GetDeclForSymbol(const llvm::pdb::PDBSymbol &symbol, lldb::LanguageType lang) {
+PDBASTParser::GetDeclForSymbol(const llvm::pdb::PDBSymbol &symbol, lldb::LanguageType cu_lang) {
   uint32_t sym_id = symbol.getSymIndexId();
   auto it = m_uid_to_decl.find(sym_id);
   if (it != m_uid_to_decl.end())
@@ -957,7 +962,7 @@ PDBASTParser::GetDeclForSymbol(const llvm::pdb::PDBSymbol &symbol, lldb::Languag
     auto class_parent_id = raw.getClassParentId();
     if (std::unique_ptr<PDBSymbol> class_parent =
             session.getSymbolById(class_parent_id)) {
-      auto *class_parent_type = symbol_file->ResolveTypeUID(class_parent_id, lang);
+      auto *class_parent_type = symbol_file->ResolveTypeUID(class_parent_id, cu_lang);
       if (!class_parent_type)
         return nullptr;
 
@@ -992,7 +997,7 @@ PDBASTParser::GetDeclForSymbol(const llvm::pdb::PDBSymbol &symbol, lldb::Languag
         // If no class methods with the same RVA were found, then create a new
         // method. It is possible for template methods.
         if (!decl)
-          decl = AddRecordMethod(*symbol_file, class_parent_ct, *func, lang);
+          decl = AddRecordMethod(*symbol_file, class_parent_ct, *func, cu_lang);
       }
 
       if (decl)
@@ -1027,8 +1032,8 @@ PDBASTParser::GetDeclForSymbol(const llvm::pdb::PDBSymbol &symbol, lldb::Languag
     clang::Decl *decl =
         GetDeclFromContextByName(m_ast.getASTContext(), *decl_context, name);
     if (!decl) {
-      CompUnitSP comp_unit = symbol_file->getCompileUnitByUID(data->getSymIndexId());
-      auto type = symbol_file->ResolveTypeUID(data->getTypeId(), comp_unit->GetLanguage());
+      LanguageType lang = symbol_file->getCompileUnitLanguage(*data);
+      auto type = symbol_file->ResolveTypeUID(data->getTypeId(), lang);
       if (!type)
         return nullptr;
 
@@ -1051,8 +1056,8 @@ PDBASTParser::GetDeclForSymbol(const llvm::pdb::PDBSymbol &symbol, lldb::Languag
     std::string name =
         std::string(MSVCUndecoratedNameParser::DropScope(func->getName()));
 
-    CompUnitSP comp_unit = symbol_file->getCompileUnitByUID(func->getSymIndexId());
-    Type *type = symbol_file->ResolveTypeUID(sym_id, comp_unit->GetLanguage());
+    LanguageType lang = symbol_file->getCompileUnitLanguage(*func);
+    Type *type = symbol_file->ResolveTypeUID(sym_id, lang);
     if (!type)
       return nullptr;
 
@@ -1069,7 +1074,7 @@ PDBASTParser::GetDeclForSymbol(const llvm::pdb::PDBSymbol &symbol, lldb::Languag
               arg_enum = sig->findAllChildren<PDBSymbolTypeFunctionArg>()) {
         while (std::unique_ptr<PDBSymbolTypeFunctionArg> arg =
                    arg_enum->getNext()) {
-          Type *arg_type = symbol_file->ResolveTypeUID(arg->getTypeId(), comp_unit->GetLanguage());
+          Type *arg_type = symbol_file->ResolveTypeUID(arg->getTypeId(), lang);
           if (!arg_type)
             continue;
 

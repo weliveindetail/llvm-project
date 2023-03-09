@@ -174,6 +174,9 @@ public:
   uint32_t GetCompilandId(const llvm::pdb::PDBSymbolData &data);
   lldb::CompUnitSP getCompileUnitByUID(lldb::user_id_t sym_uid);
 
+  lldb::LanguageType getCompileUnitLanguage(const llvm::pdb::PDBSymbolData &pdb_data);
+  lldb::LanguageType getCompileUnitLanguage(const llvm::pdb::PDBSymbolFunc &pdb_func);
+
   bool IsaNSObjectOrNSProxy(const llvm::pdb::PDBSymbolTypeUDT &udt) const;
   bool IsObjCBuiltinTypeId(lldb::user_id_t sym_uid) const;
   bool IsObjCBuiltinTypeSel(lldb::user_id_t sym_uid) const;
