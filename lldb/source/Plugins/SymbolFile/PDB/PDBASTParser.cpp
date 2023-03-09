@@ -794,40 +794,21 @@ lldb::TypeSP PDBASTParser::CreateLLDBTypeFromPDBType(const PDBSymbol &type, Lang
     auto *pointer_type = llvm::dyn_cast<PDBSymbolTypePointer>(&type);
     assert(pointer_type);
 
-    if (cu_lang == eLanguageTypeObjC ||
-        cu_lang == eLanguageTypeObjC_plus_plus) {
-        // Clang sometimes erroneously emits id as objc_object*.  In that
-        // case we fix up the type to "id".
-        //    if (log)
-        //      dwarf->GetObjectFile()->GetModule()->LogMessage(
-        //          log,
-        //          "SymbolFileDWARF::ParseType (die = {0:x16}) {1} "
-        //          "'{2}' is 'objc_object*', which we overrode to "
-        //          "'id'.",
-        //          die.GetOffset(), die.GetTagAsCString(), die.GetName());
-        //    clang_type = m_ast.GetBasicType(eBasicTypeObjCID);
-        //    encoding_data_type = Type::eEncodingIsUID;
-        //    attrs.type.Clear();
-        //    resolve_state = Type::ResolveState::Full;
-    }
-
     auto *symbol_file = static_cast<SymbolFilePDB *>(m_ast.GetSymbolFile());
     if (!symbol_file)
       return nullptr;
 
     auto pdb_pointee_type = pointer_type->getPointeeType()->getSymIndexId();
-    if (symbol_file->IsaObjCSpecialMemberId(pdb_pointee_type)) {
-      // Clang emits id as objc_object* and we fix it up manually to the built-in "id" type
+    if (symbol_file->IsObjCBuiltinTypeId(pdb_pointee_type)) {
+      // Clang emits id as objc_object* and we fill in the built-in "id" type
       if (log)
-        LLDB_LOG(log, "Fixing up type {0}: ObjC special member `id`", pdb_pointee_type);
+        LLDB_LOG(log, "Fixing up type {0}: ObjC built-in type `id`", pdb_pointee_type);
       CompilerType id_type = m_ast.GetBasicType(eBasicTypeObjCID);
-      CompilerType id_pointer_type = id_type.GetPointerType();
-
       AddSourceLocationForSymbolDecl(type, decl);
       return symbol_file->MakeType(
           pointer_type->getSymIndexId(), ConstString("id"),
           pointer_type->getLength(), nullptr, pdb_pointee_type,
-          lldb_private::Type::eEncodingIsUID, decl, id_pointer_type,
+          lldb_private::Type::eEncodingIsUID, decl, id_type,
           lldb_private::Type::ResolveState::Full);
     }
 

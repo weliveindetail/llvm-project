@@ -175,7 +175,7 @@ public:
   lldb::CompUnitSP getCompileUnitByUID(lldb::user_id_t sym_uid);
 
   bool IsaNSObjectOrNSProxy(const llvm::pdb::PDBSymbolTypeUDT &udt) const;
-  bool IsaObjCSpecialMemberId(lldb::user_id_t sym_uid) const;
+  bool IsObjCBuiltinTypeId(lldb::user_id_t sym_uid) const;
 
 private:
   struct SecContribInfo {

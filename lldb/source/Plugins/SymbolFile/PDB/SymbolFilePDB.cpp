@@ -597,7 +597,7 @@ bool SymbolFilePDB::IsaNSObjectOrNSProxy(const PDBSymbolTypeUDT &pdb_udt) const 
   return IsaNSObjectOrNSProxy(*pdb_base_udt);
 }
 
-bool SymbolFilePDB::IsaObjCSpecialMemberId(user_id_t sym_uid) const {
+bool SymbolFilePDB::IsObjCBuiltinTypeId(user_id_t sym_uid) const {
   std::unique_ptr<PDBSymbol> pdb_sym_up = m_session_up->getSymbolById(sym_uid);
   if (pdb_sym_up->getSymTag() != PDB_SymType::UDT)
     return false; // id member is encoded as UDT
