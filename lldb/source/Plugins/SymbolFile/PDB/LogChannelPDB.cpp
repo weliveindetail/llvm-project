@@ -23,7 +23,11 @@ template <> Log::Channel &lldb_private::LogChannelFor<PDBLog>() {
 }
 
 void LogChannelPDB::Initialize() {
-  Log::Register("pdb", g_channel);
+  // Unit tests may call init more than once
+  static llvm::once_flag g_once_flag;
+  llvm::call_once(g_once_flag, []() {
+    Log::Register("pdb", g_channel);
+  });
 }
 
 void LogChannelPDB::Terminate() { Log::Unregister("pdb"); }
