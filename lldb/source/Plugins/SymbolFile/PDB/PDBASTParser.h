@@ -100,7 +100,7 @@ private:
                         lldb_private::CompilerType &record_type,
                         PDBFuncSymbolEnumerator &methods_enum,
                         lldb::LanguageType lang);
-  clang::CXXMethodDecl *
+  clang::NamedDecl *
   AddRecordMethod(SymbolFilePDB &symbol_file,
                   lldb_private::CompilerType &record_type,
                   const llvm::pdb::PDBSymbolFunc &method,

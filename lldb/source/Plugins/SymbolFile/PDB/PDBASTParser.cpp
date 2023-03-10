@@ -43,6 +43,8 @@
 #include "llvm/DebugInfo/PDB/PDBSymbolTypeUDT.h"
 
 #include "Plugins/Language/CPlusPlus/MSVCUndecoratedNameParser.h"
+#include "Plugins/Language/ObjC/ObjCLanguage.h"
+
 #include <optional>
 
 using namespace lldb;
@@ -410,7 +412,7 @@ lldb::TypeSP PDBASTParser::CreateLLDBTypeFromPDBType(const PDBSymbol &type, Lang
       return nullptr;
 
     if (log)
-      LLDB_LOG(log, "UDT type '{0}' ({1:x}):", udt->getName(), udt->getRawSymbol().getTypeId());
+      LLDB_LOG(log, "UDT type '{0}' ({1:x}):", name, udt->getSymIndexId());
 
     auto decl_context = GetDeclContextContainingSymbol(type);
 
@@ -1553,12 +1555,12 @@ void PDBASTParser::AddRecordMethods(SymbolFilePDB &symbol_file,
                                     PDBFuncSymbolEnumerator &methods_enum,
                                     LanguageType lang) {
   while (std::unique_ptr<PDBSymbolFunc> method = methods_enum.getNext())
-    if (clang::CXXMethodDecl *decl =
+    if (clang::NamedDecl *decl =
             AddRecordMethod(symbol_file, record_type, *method, lang))
       m_uid_to_decl[method->getSymIndexId()] = decl;
 }
 
-clang::CXXMethodDecl *
+clang::NamedDecl *
 PDBASTParser::AddRecordMethod(SymbolFilePDB &symbol_file,
                               lldb_private::CompilerType &record_type,
                               const llvm::pdb::PDBSymbolFunc &method,
@@ -1587,6 +1589,27 @@ PDBASTParser::AddRecordMethod(SymbolFilePDB &symbol_file,
   AccessType access = TranslateMemberAccess(method.getAccess());
   if (access == eAccessNone)
     access = eAccessPublic;
+
+  if (TypeSystemClang::IsObjCObjectOrInterfaceType(record_type)) {
+    ObjCLanguage::MethodName objc_method(name, true);
+    if (objc_method.IsValid(true)) {
+      bool is_artificial = method.isCompilerGenerated();
+      bool is_variadic = method.getSignature()->isCVarArgs();
+      bool is_objc_direct_call = false; // PDB has no such attribute
+
+      clang::ObjCMethodDecl *objc_method_decl =
+          m_ast.AddMethodToObjCObjectType(
+              record_type, objc_method.GetFullName().GetCString(),
+              method_comp_type, access, is_artificial, is_variadic,
+              is_objc_direct_call);
+      if (!objc_method_decl) {
+        symbol_file.GetObjectFile()->GetModule()->ReportWarning(
+            "Ignoring invalid Objective-C method {0}", name);
+        return nullptr;
+      }
+      return objc_method_decl;
+    }
+  }
 
   // TODO: get mangled name for the method.
   return m_ast.AddMethodToCXXRecordType(
