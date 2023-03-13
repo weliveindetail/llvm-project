@@ -1,0 +1,10 @@
+REQUIRES: gnustep-objc
+
+# We need something like this:
+# clang -DGNUSTEP -DNO_LEGACY -DOLDABI_COMPAT=1 -DTYPE_DEPENDENT_DISPATCH -I/home/ez/Develop/2023-Algoriddim/libobjc2 -x objective-c -g -Xclang -fblocks -Xclang -fobjc-exceptions -O0 -fobjc-runtime=gnustep-2.0 -UNDEBUG -DGS_RUNTIME_V2 -Wno-deprecated-objc-isa-usage -Wno-objc-root-class -fobjc-runtime=gnustep-2.0 -std=gnu17 -MD -MT Test/CMakeFiles/RuntimeTest.dir/RuntimeTest.m.o -MF Test/CMakeFiles/RuntimeTest.dir/RuntimeTest.m.o.d -o Test/CMakeFiles/RuntimeTest.dir/RuntimeTest.m.o -c /home/ez/Develop/2023-Algoriddim/libobjc2/Test/RuntimeTest.m
+# clang -g  Test/CMakeFiles/test_runtime.dir/Test.m.o Test/CMakeFiles/RuntimeTest.dir/RuntimeTest.m.o -o Test/RuntimeTest  -Wl,-rpath,/home/ez/Develop/2023-Algoriddim/libobjc2/build  libobjc.so.4.6  -lm && :
+
+RUN: %build --verbose --compiler=clang --std=gnu17 --link-gnustep --output=%t.exe %S/Inputs/ExpressionsObjCTest.m
+RUN: not %lldb -b -s %S/Inputs/ExpressionsObjCTest0.script -- %t.exe 2>&1 | FileCheck %s
+
+CHECK: (lldb) print *foo

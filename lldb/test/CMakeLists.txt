@@ -25,6 +25,9 @@ set(LLDB_TEST_MODULE_CACHE_CLANG "${LLDB_TEST_BUILD_DIRECTORY}/module-cache-clan
 file(MAKE_DIRECTORY ${LLDB_TEST_MODULE_CACHE_LLDB})
 file(MAKE_DIRECTORY ${LLDB_TEST_MODULE_CACHE_CLANG})
 
+# Windows and Linux don't come with a built-in ObjC runtime. Let the user provide a path to use GNUstep.
+set(LLDB_TEST_GNUSTEP_OBJC "" CACHE PATH "Provide the path to GNUstep libobjc2 enable ObjC tests on Windows and Linux")
+
 # LLVM_BUILD_MODE is used in lit.site.cfg
 if (CMAKE_CFG_INTDIR STREQUAL ".")
   set(LLVM_BUILD_MODE ".")

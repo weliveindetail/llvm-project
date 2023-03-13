@@ -49,6 +49,18 @@ parser.add_argument('--tools-dir',
                     action='append',
                     help='If specified, a path to search in addition to PATH when --compiler is not an exact path')
 
+parser.add_argument('--gnustep-objc-dir',
+                    metavar='directory',
+                    dest='gnustep_objc_dir',
+                    required=False,
+                    help='If specified, a path to GNUstep libobjc2 for use as ObjC runtime on Windows and Linux')
+
+parser.add_argument('--link-gnustep',
+                    dest='link_gnustep',
+                    action='store_true',
+                    default=False,
+                    help='Link against GNUstep libobjc2 on Windows and Linux')
+
 if sys.platform == 'darwin':
     parser.add_argument('--apple-sdk',
                         metavar='apple_sdk',
@@ -237,6 +249,8 @@ class Builder(object):
         self.verbose = args.verbose
         self.obj_ext = obj_ext
         self.lib_paths = args.libs_dir
+        self.gnustep_objc_dir = args.gnustep_objc_dir
+        self.link_gnustep = args.link_gnustep
         self.std = args.std
 
     def _exe_file_name(self):
@@ -656,14 +670,20 @@ class GccBuilder(Builder):
             args.append('-static')
         args.append('-c')
 
-        args.extend(['-o', obj])
-        args.append(source)
-
         if sys.platform == 'darwin':
             args.extend(['-isysroot', self.apple_sdk])
+        elif self.gnustep_objc_dir:
+            runtime = ['-fobjc-runtime=gnustep-2.0', '-I', self.gnustep_objc_dir + '/..']
+            if source.endswith('.m'):
+                args.extend(runtime + ['-x', 'objective-c'])
+            elif source.endswith('.mm'):
+                args.extend(runtime + ['-x', 'objective-c++'])
 
         if self.std:
             args.append('-std={0}'.format(self.std))
+
+        args.extend(['-o', obj])
+        args.append(source)
 
         return ('compiling', [source], obj, None, args)
 
@@ -686,6 +706,8 @@ class GccBuilder(Builder):
 
         if sys.platform == 'darwin':
             args.extend(['-isysroot', self.apple_sdk])
+        elif self.gnustep_objc_dir and self.link_gnustep:
+            args.extend(['-fobjc-runtime=gnustep-2.0', '-L', self.gnustep_objc_dir, '-l', 'objc'])
 
         return ('linking', self._obj_file_names(), self._exe_file_name(), None, args)
 

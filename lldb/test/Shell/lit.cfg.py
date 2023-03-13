@@ -135,6 +135,9 @@ if config.lldb_system_debugserver:
 if config.have_lldb_server:
     config.available_features.add('lldb-server')
 
+if config.gnustep_objc:
+    config.available_features.add('gnustep-objc')
+
 # NetBSD permits setting dbregs either if one is root
 # or if user_set_dbregs is enabled
 can_set_dbregs = True
