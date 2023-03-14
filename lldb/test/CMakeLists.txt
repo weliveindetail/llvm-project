@@ -25,6 +25,21 @@ set(LLDB_TEST_MODULE_CACHE_CLANG "${LLDB_TEST_BUILD_DIRECTORY}/module-cache-clan
 file(MAKE_DIRECTORY ${LLDB_TEST_MODULE_CACHE_LLDB})
 file(MAKE_DIRECTORY ${LLDB_TEST_MODULE_CACHE_CLANG})
 
+# Windows and Linux have no built-in ObjC runtime. Let the user provide a path and use GNUstep.
+set(LLDB_TEST_OBJC_GNUSTEP_DIR "" CACHE PATH "GNUstep libobjc2 path for ObjC tests on Windows and Linux")
+if (UNIX AND NOT APPLE)
+  find_path(gnustep_install_dir NAMES lib/libobjc.so include/objc/runtime.h)
+  set(gnustep_info lib/libobjc.so)
+elseif (WIN32 AND EXISTS "C:/Program Files (x86)/libobjc/lib/objc.dll"
+              AND EXISTS "C:/Program Files (x86)/libobjc/include/objc/runtime.h")
+  set(gnustep_install_dir "C:/Program Files (x86)/libobjc")
+  set(gnustep_info lib/objc.dll)
+endif()
+if (gnustep_install_dir)
+  set(LLDB_TEST_OBJC_GNUSTEP_DIR ${gnustep_install_dir})
+  message(STATUS "Found GNUstep ObjC runtime: ${LLDB_TEST_OBJC_GNUSTEP_DIR}/${gnustep_info}")
+endif()
+
 # LLVM_BUILD_MODE is used in lit.site.cfg
 if (CMAKE_CFG_INTDIR STREQUAL ".")
   set(LLVM_BUILD_MODE ".")
