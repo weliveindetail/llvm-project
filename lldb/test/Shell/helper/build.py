@@ -49,6 +49,18 @@ parser.add_argument('--tools-dir',
                     action='append',
                     help='If specified, a path to search in addition to PATH when --compiler is not an exact path')
 
+parser.add_argument('--objc-gnustep-dir',
+                    metavar='directory',
+                    dest='objc_gnustep_dir',
+                    required=False,
+                    help='If specified, a path to GNUstep libobjc2 runtime for use on Windows and Linux')
+
+parser.add_argument('--objc-gnustep',
+                    dest='objc_gnustep',
+                    action='store_true',
+                    default=False,
+                    help='Windows and Linux include/link GNUstep libobjc2 for this build')
+
 if sys.platform == 'darwin':
     parser.add_argument('--apple-sdk',
                         metavar='apple_sdk',
@@ -231,6 +243,10 @@ class Builder(object):
         self.verbose = args.verbose
         self.obj_ext = obj_ext
         self.lib_paths = args.libs_dir
+        if args.objc_gnustep:
+            assert args.objc_gnustep_dir, "GNUstep libobjc2 runtime for Linux and Windows"
+            self.objc_gnustep_inc = os.path.join(args.objc_gnustep_dir, 'include')
+            self.objc_gnustep_lib = os.path.join(args.objc_gnustep_dir, 'lib')
 
     def _exe_file_name(self):
         assert self.mode != 'compile'
@@ -646,11 +662,16 @@ class GccBuilder(Builder):
             args.append('-static')
         args.append('-c')
 
-        args.extend(['-o', obj])
-        args.append(source)
-
         if sys.platform == 'darwin':
             args.extend(['-isysroot', self.apple_sdk])
+        elif self.objc_gnustep_inc:
+            if source.endswith('.m') or source.endswith('.mm'):
+                args.extend(['-fobjc-runtime=gnustep-2.0', '-I', self.objc_gnustep_inc])
+                if sys.platform == "win32":
+                    args.extend(['-Xclang', '-gcodeview', '-Xclang', '--dependent-lib=msvcrtd'])
+
+        args.extend(['-o', obj])
+        args.append(source)
 
         return ('compiling', [source], obj, None, args)
 
@@ -673,6 +694,12 @@ class GccBuilder(Builder):
 
         if sys.platform == 'darwin':
             args.extend(['-isysroot', self.apple_sdk])
+        elif self.objc_gnustep_lib:
+            args.extend(['-L', self.objc_gnustep_lib, '-lobjc'])
+            if sys.platform == 'linux':
+                args.extend(['-Wl,-rpath,' + self.objc_gnustep_lib])
+            elif sys.platform == 'win32':
+                args.extend(['-fuse-ld=lld-link', '-g', '-Xclang', '--dependent-lib=msvcrtd'])
 
         return ('linking', self._obj_file_names(), self._exe_file_name(), None, args)
 
