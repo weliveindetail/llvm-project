@@ -49,6 +49,18 @@ parser.add_argument('--tools-dir',
                     action='append',
                     help='If specified, a path to search in addition to PATH when --compiler is not an exact path')
 
+parser.add_argument('--objc-gnustep-dir',
+                    metavar='directory',
+                    dest='objc_gnustep_dir',
+                    required=False,
+                    help='If specified, a path to GNUstep libobjc2 runtime for use on Windows and Linux')
+
+parser.add_argument('--objc-gnustep',
+                    dest='objc_gnustep',
+                    action='store_true',
+                    default=False,
+                    help='Windows and Linux include/link GNUstep libobjc2 for this build')
+
 if sys.platform == 'darwin':
     parser.add_argument('--apple-sdk',
                         metavar='apple_sdk',
@@ -231,6 +243,8 @@ class Builder(object):
         self.verbose = args.verbose
         self.obj_ext = obj_ext
         self.lib_paths = args.libs_dir
+        self.objc_gnustep = args.objc_gnustep
+        self.objc_gnustep_dir = args.objc_gnustep_dir
 
     def _exe_file_name(self):
         assert self.mode != 'compile'
@@ -646,11 +660,15 @@ class GccBuilder(Builder):
             args.append('-static')
         args.append('-c')
 
-        args.extend(['-o', obj])
-        args.append(source)
-
         if sys.platform == 'darwin':
             args.extend(['-isysroot', self.apple_sdk])
+        elif self.objc_gnustep:
+            assert self.objc_gnustep_dir, "GNUstep libobjc2 runtime for Linux and Windows"
+            if source.endswith('.m') or source.endswith('.mm'):
+                args.extend(['-fobjc-runtime=gnustep-2.0', '-I', self.objc_gnustep_dir + '/..'])
+
+        args.extend(['-o', obj])
+        args.append(source)
 
         return ('compiling', [source], obj, None, args)
 
@@ -673,6 +691,9 @@ class GccBuilder(Builder):
 
         if sys.platform == 'darwin':
             args.extend(['-isysroot', self.apple_sdk])
+        elif self.objc_gnustep:
+            args.extend(['-L' + self.objc_gnustep_dir,
+                         '-Wl,-rpath,' + self.objc_gnustep_dir, '-lobjc'])
 
         return ('linking', self._obj_file_names(), self._exe_file_name(), None, args)
 
