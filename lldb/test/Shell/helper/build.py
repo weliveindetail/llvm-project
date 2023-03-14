@@ -676,6 +676,8 @@ class GccBuilder(Builder):
             assert self.objc_gnustep_dir, "GNUstep libobjc2 runtime for Linux and Windows"
             if source.endswith('.m') or source.endswith('.mm'):
                 args.extend(['-fobjc-runtime=gnustep-2.0', '-I', self.objc_gnustep_dir + '/..'])
+                if sys.platform == "win32":
+                    args.extend(['-Xclang', '-gcodeview', '-Xclang', '--dependent-lib=msvcrtd'])
 
         if self.std:
             args.append('-std={0}'.format(self.std))
@@ -705,8 +707,11 @@ class GccBuilder(Builder):
         if sys.platform == 'darwin':
             args.extend(['-isysroot', self.apple_sdk])
         elif self.objc_gnustep:
-            args.extend(['-L' + self.objc_gnustep_dir,
-                         '-Wl,-rpath,' + self.objc_gnustep_dir, '-lobjc'])
+            args.extend(['-L' + self.objc_gnustep_dir, '-lobjc'])
+            if sys.platform == 'linux':
+                args.extend(['-Wl,-rpath,' + self.objc_gnustep_dir])
+            elif sys.platform == 'win32':
+                args.extend(['-fuse-ld=lld-link', '-g', '-Xclang', '--dependent-lib=msvcrtd'])
 
         return ('linking', self._obj_file_names(), self._exe_file_name(), None, args)
 
