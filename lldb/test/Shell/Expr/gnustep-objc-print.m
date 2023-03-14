@@ -1,3 +1,8 @@
+// REQUIRES: objc-gnustep
+//
+// RUN: %build %s --compiler=clang --std=gnu17 --objc-gnustep --output=%t
+// RUN: %lldb -b -o "b ok" -o "run" -o "p self" -o "p *self" -- %t | FileCheck %s
+
 #import "objc/runtime.h"
 
 @protocol NSCoding
@@ -45,9 +50,27 @@ __attribute__((objc_root_class))
 	return self;
 }
 - (int)ok {
-	return self ? 1 : 0;
+	return self ? 0 : 1;
 }
 @end
+
+// CHECK: (lldb) b ok
+// CHECK: Breakpoint {{.*}} at gnustep-objc-print.m
+//
+// CHECK: (lldb) run
+// CHECK: Process {{[0-9]+}} stopped
+// CHECK: -[TestObj ok](self=[[SELF_PTR:0x[0-9]+]]{{.*}}) at gnustep-objc-print.m
+//
+// CHECK: (lldb) p self
+// CHECK: (TestObj *) $0 = [[SELF_PTR]]
+//
+// CHECK: (lldb) p *self
+// CHECK: (TestObj) $1 = {
+// CHECK:   NSObject = {
+// CHECK:     isa
+// CHECK:     refcount
+// CHECK:   }
+// CHECK: }
 
 int main() {
 	TestObj *testObj = [TestObj new];
