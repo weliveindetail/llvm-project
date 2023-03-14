@@ -137,6 +137,10 @@ if config.have_lldb_server:
 
 if config.objc_gnustep_dir:
     config.available_features.add('objc-gnustep')
+    if platform.system() == 'Windows':
+        # Runtime DLL must be in PATH since Windows has no rpath
+        config.environment['PATH'] = os.path.pathsep.join((
+            config.objc_gnustep_dir, config.environment.get('PATH','')))
 
 # NetBSD permits setting dbregs either if one is root
 # or if user_set_dbregs is enabled

@@ -1,7 +1,8 @@
 // REQUIRES: objc-gnustep
+// XFAIL: system-windows
 //
-// RUN: %build %s --compiler=clang --std=gnu17 --objc-gnustep --output=%t
-// RUN: %lldb -b -o "b ok" -o "run" -o "p self" -o "p *self" -- %t | FileCheck %s
+// RUN: %build %s --compiler=clang --objc-gnustep --output=%t
+// RUN: %lldb -b -o "b objc-gnustep-print.m:53" -o "run" -o "p self" -o "p *self" -- %t | FileCheck %s
 
 #import "objc/runtime.h"
 
@@ -54,18 +55,18 @@ __attribute__((objc_root_class))
 }
 @end
 
-// CHECK: (lldb) b ok
-// CHECK: Breakpoint {{.*}} at gnustep-objc-print.m
+// CHECK: (lldb) b objc-gnustep-print.m:53
+// CHECK: Breakpoint {{.*}} at objc-gnustep-print.m
 //
 // CHECK: (lldb) run
 // CHECK: Process {{[0-9]+}} stopped
-// CHECK: -[TestObj ok](self=[[SELF_PTR:0x[0-9]+]]{{.*}}) at gnustep-objc-print.m
+// CHECK: -[TestObj ok](self=[[SELF_PTR:0x[0-9]+]]{{.*}}) at objc-gnustep-print.m
 //
 // CHECK: (lldb) p self
 // CHECK: (TestObj *) $0 = [[SELF_PTR]]
 //
 // CHECK: (lldb) p *self
-// CHECK: (TestObj) $1 = {
+// CHECK: (TestObj) ${{[0-9]+}} = {
 // CHECK:   NSObject = {
 // CHECK:     isa
 // CHECK:     refcount
