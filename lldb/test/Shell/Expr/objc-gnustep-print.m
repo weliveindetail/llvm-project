@@ -2,7 +2,6 @@
 // XFAIL: system-windows
 //
 // RUN: %build %s --compiler=clang --objc-gnustep --output=%t
-// RUN: %lldb -b -o "b objc-gnustep-print.m:35" -o "run" -o "p self" -o "p *self" -- %t | FileCheck %s
 
 #import "objc/runtime.h"
 
@@ -15,46 +14,49 @@ __attribute__((objc_root_class))
 #endif
 #endif
 @interface NSObject <NSCoding> {
-	id isa;
-	int refcount;
+  id isa;
+  int refcount;
 }
 @end
 @implementation NSObject
 - (id)class {
-	return object_getClass(self);
+  return object_getClass(self);
 }
 + (id)new {
-	return class_createInstance(self, 0);
+  return class_createInstance(self, 0);
 }
 @end
+
 @interface TestObj : NSObject {}
 - (int)ok;
 @end
 @implementation TestObj
 - (int)ok {
-	return self ? 0 : 1;
+  return self ? 0 : 1;
 }
 @end
 
-// CHECK: (lldb) b objc-gnustep-print.m:35
-// CHECK: Breakpoint {{.*}} at objc-gnustep-print.m
+// RUN: %lldb -b -o "b objc-gnustep-print.m:35" -o "run" -o "p self" -o "p *self" -- %t | FileCheck %s --check-prefix=SELF
 //
-// CHECK: (lldb) run
-// CHECK: Process {{[0-9]+}} stopped
-// CHECK: -[TestObj ok](self=[[SELF_PTR:0x[0-9]+]]{{.*}}) at objc-gnustep-print.m:35
+// SELF: (lldb) b objc-gnustep-print.m:35
+// SELF: Breakpoint {{.*}} at objc-gnustep-print.m
 //
-// CHECK: (lldb) p self
-// CHECK: (TestObj *) $0 = [[SELF_PTR]]
+// SELF: (lldb) run
+// SELF: Process {{[0-9]+}} stopped
+// SELF: -[TestObj ok](self=[[SELF_PTR:0x[0-9]+]]{{.*}}) at objc-gnustep-print.m:35
 //
-// CHECK: (lldb) p *self
-// CHECK: (TestObj) $1 = {
-// CHECK:   NSObject = {
-// CHECK:     isa
-// CHECK:     refcount
-// CHECK:   }
-// CHECK: }
+// SELF: (lldb) p self
+// SELF: (TestObj *) $0 = [[SELF_PTR]]
+//
+// SELF: (lldb) p *self
+// SELF: (TestObj) $1 = {
+// SELF:   NSObject = {
+// SELF:     isa
+// SELF:     refcount
+// SELF:   }
+// SELF: }
 
 int main() {
-	TestObj *testObj = [TestObj new];
-	return [testObj ok];
+  TestObj *t = [TestObj new];
+  return [t ok];
 }

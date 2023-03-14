@@ -59,7 +59,7 @@ parser.add_argument('--objc-gnustep',
                     dest='objc_gnustep',
                     action='store_true',
                     default=False,
-                    help='Windows and Linux include/link GNUstep libobjc2 for this build')
+                    help='Include and link GNUstep libobjc2 (Windows and Linux only)')
 
 if sys.platform == 'darwin':
     parser.add_argument('--apple-sdk',
@@ -243,10 +243,10 @@ class Builder(object):
         self.verbose = args.verbose
         self.obj_ext = obj_ext
         self.lib_paths = args.libs_dir
-        if args.objc_gnustep:
-            assert args.objc_gnustep_dir, "GNUstep libobjc2 runtime for Linux and Windows"
-            self.objc_gnustep_inc = os.path.join(args.objc_gnustep_dir, 'include')
-            self.objc_gnustep_lib = os.path.join(args.objc_gnustep_dir, 'lib')
+        assert not args.objc_gnustep or args.objc_gnustep_dir, \
+               "--objc-gnustep specified without path to libobjc2"
+        self.objc_gnustep_inc = os.path.join(args.objc_gnustep_dir, 'include') if args.objc_gnustep_dir else None
+        self.objc_gnustep_lib = os.path.join(args.objc_gnustep_dir, 'lib') if args.objc_gnustep_dir else None
 
     def _exe_file_name(self):
         assert self.mode != 'compile'
