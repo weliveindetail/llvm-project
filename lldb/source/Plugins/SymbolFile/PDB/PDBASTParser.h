@@ -45,10 +45,10 @@ public:
   PDBASTParser(lldb_private::TypeSystemClang &ast);
   ~PDBASTParser();
 
-  lldb::TypeSP CreateLLDBTypeFromPDBType(const llvm::pdb::PDBSymbol &type);
+  lldb::TypeSP CreateLLDBTypeFromPDBType(const llvm::pdb::PDBSymbol &type, lldb::LanguageType lang);
   bool CompleteTypeFromPDB(lldb_private::CompilerType &compiler_type);
 
-  clang::Decl *GetDeclForSymbol(const llvm::pdb::PDBSymbol &symbol);
+  clang::Decl *GetDeclForSymbol(const llvm::pdb::PDBSymbol &symbol, lldb::LanguageType lang);
 
   clang::DeclContext *
   GetDeclContextForSymbol(const llvm::pdb::PDBSymbol &symbol);
@@ -65,8 +65,7 @@ public:
   }
 
 private:
-  typedef llvm::DenseMap<clang::CXXRecordDecl *, lldb::user_id_t>
-      CXXRecordDeclToUidMap;
+  typedef llvm::DenseMap<clang::NamedDecl *, lldb::user_id_t> DeclToUidMap;
   typedef llvm::DenseMap<lldb::user_id_t, clang::Decl *> UidToDeclMap;
   typedef std::set<clang::NamespaceDecl *> NamespacesSet;
   typedef llvm::DenseMap<clang::DeclContext *, NamespacesSet>
@@ -82,31 +81,35 @@ private:
 
   bool AddEnumValue(lldb_private::CompilerType enum_type,
                     const llvm::pdb::PDBSymbolData &data);
-  bool CompleteTypeFromUDT(lldb_private::SymbolFile &symbol_file,
+  bool CompleteTypeFromUDT(SymbolFilePDB &symbol_file,
                            lldb_private::CompilerType &compiler_type,
                            llvm::pdb::PDBSymbolTypeUDT &udt);
   void
-  AddRecordMembers(lldb_private::SymbolFile &symbol_file,
+  AddRecordMembers(SymbolFilePDB &symbol_file,
                    lldb_private::CompilerType &record_type,
                    PDBDataSymbolEnumerator &members_enum,
-                   lldb_private::ClangASTImporter::LayoutInfo &layout_info);
+                   lldb_private::ClangASTImporter::LayoutInfo &layout_info,
+                   lldb::LanguageType lang);
   void
-  AddRecordBases(lldb_private::SymbolFile &symbol_file,
+  AddRecordBases(SymbolFilePDB &symbol_file,
                  lldb_private::CompilerType &record_type, int record_kind,
                  PDBBaseClassSymbolEnumerator &bases_enum,
-                 lldb_private::ClangASTImporter::LayoutInfo &layout_info) const;
-  void AddRecordMethods(lldb_private::SymbolFile &symbol_file,
+                 lldb_private::ClangASTImporter::LayoutInfo &layout_info,
+                 lldb::LanguageType lang) const;
+  void AddRecordMethods(SymbolFilePDB &symbol_file,
                         lldb_private::CompilerType &record_type,
-                        PDBFuncSymbolEnumerator &methods_enum);
-  clang::CXXMethodDecl *
-  AddRecordMethod(lldb_private::SymbolFile &symbol_file,
+                        PDBFuncSymbolEnumerator &methods_enum,
+                        lldb::LanguageType lang);
+  clang::NamedDecl *
+  AddRecordMethod(SymbolFilePDB &symbol_file,
                   lldb_private::CompilerType &record_type,
-                  const llvm::pdb::PDBSymbolFunc &method) const;
+                  const llvm::pdb::PDBSymbolFunc &method,
+                  lldb::LanguageType lang) const;
 
   lldb_private::TypeSystemClang &m_ast;
   lldb_private::ClangASTImporter m_ast_importer;
 
-  CXXRecordDeclToUidMap m_forward_decl_to_uid;
+  DeclToUidMap m_forward_decl_to_uid;
   UidToDeclMap m_uid_to_decl;
   ParentToNamespacesMap m_parent_to_namespaces;
   NamespacesSet m_namespaces;
