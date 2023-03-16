@@ -169,6 +169,8 @@ public:
 
   void DumpClangAST(lldb_private::Stream &s) override;
 
+  bool IsaNSObjectOrNSProxy(const llvm::pdb::PDBSymbolTypeUDT &udt) const;
+
 private:
   struct SecContribInfo {
     uint32_t Offset;

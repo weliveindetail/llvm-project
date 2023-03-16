@@ -22,6 +22,7 @@
 #include "lldb/Symbol/SymbolFile.h"
 #include "lldb/Symbol/TypeMap.h"
 #include "lldb/Symbol/TypeSystem.h"
+#include "lldb/Target/Language.h"
 #include "lldb/Utility/LLDBLog.h"
 #include "llvm/DebugInfo/PDB/ConcreteSymbolEnumerator.h"
 #include "llvm/DebugInfo/PDB/IPDBLineNumber.h"
@@ -40,6 +41,9 @@
 #include "llvm/DebugInfo/PDB/PDBSymbolTypeUDT.h"
 
 #include "Plugins/Language/CPlusPlus/MSVCUndecoratedNameParser.h"
+#include "Plugins/Language/ObjC/ObjCLanguage.h"
+
+#include <optional>
 
 using namespace lldb;
 using namespace lldb_private;
@@ -394,13 +398,27 @@ lldb::TypeSP PDBASTParser::CreateLLDBTypeFromPDBType(const PDBSymbol &type) {
 
     auto decl_context = GetDeclContextContainingSymbol(type);
 
+    // PDB has no attribute to encode the language per symbol. We assume
+    // all ObjCInterfaceDecls to derive from specific base classes.
+    LanguageType lang = eLanguageTypeC_plus_plus;
+    auto *symbol_file = static_cast<SymbolFilePDB *>(m_ast.GetSymbolFile());
+    if (symbol_file->IsaNSObjectOrNSProxy(*udt))
+      lang = eLanguageTypeObjC;
+
     // Check if such an UDT already exists in the current context.
     // This may occur with const or volatile types. There are separate type
     // symbols in PDB for types with const or volatile modifiers, but we need
     // to create only one declaration for them all.
+    CompilerType clang_type;
+    if (lang == eLanguageTypeObjC) {
+      clang_type = m_ast.GetTypeForIdentifier<clang::ObjCInterfaceDecl>(
+          ConstString(name), decl_context);
+    } else {
+      clang_type = m_ast.GetTypeForIdentifier<clang::CXXRecordDecl>(
+          ConstString(name), decl_context);
+    }
+
     Type::ResolveState type_resolve_state;
-    CompilerType clang_type = m_ast.GetTypeForIdentifier<clang::CXXRecordDecl>(
-        ConstString(name), decl_context);
     if (!clang_type.IsValid()) {
       auto access = GetAccessibilityForUdt(*udt);
 
@@ -410,21 +428,26 @@ lldb::TypeSP PDBASTParser::CreateLLDBTypeFromPDBType(const PDBSymbol &type) {
       metadata.SetUserID(type.getSymIndexId());
       metadata.SetIsDynamicCXXType(false);
 
-      clang_type = m_ast.CreateRecordType(
-          decl_context, OptionalClangModuleID(), access, name, tag_type_kind,
-          lldb::eLanguageTypeC_plus_plus, &metadata);
+      clang_type =
+          m_ast.CreateRecordType(decl_context, OptionalClangModuleID(), access,
+                                 name, tag_type_kind, lang, &metadata);
       assert(clang_type.IsValid());
 
-      auto record_decl =
-          m_ast.GetAsCXXRecordDecl(clang_type.GetOpaqueQualType());
-      assert(record_decl);
-      m_uid_to_decl[type.getSymIndexId()] = record_decl;
+      clang::NamedDecl *cached_decl;
+      if (TypeSystemClang::IsObjCObjectOrInterfaceType(clang_type)) {
+        // We start the declaration definition only once the full compiler type
+        // is requested since the underlying decls for ObjC types don't respond
+        // to isCompleteDefinition().
+        cached_decl = m_ast.GetAsObjCInterfaceDecl(clang_type);
+      } else {
+        cached_decl = m_ast.GetAsCXXRecordDecl(clang_type.GetOpaqueQualType());
+        cached_decl->addAttr(clang::MSInheritanceAttr::CreateImplicit(
+            m_ast.getASTContext(), GetMSInheritance(*udt)));
 
-      auto inheritance_attr = clang::MSInheritanceAttr::CreateImplicit(
-          m_ast.getASTContext(), GetMSInheritance(*udt));
-      record_decl->addAttr(inheritance_attr);
+        TypeSystemClang::StartTagDeclarationDefinition(clang_type);
+      }
 
-      TypeSystemClang::StartTagDeclarationDefinition(clang_type);
+      m_uid_to_decl[type.getSymIndexId()] = cached_decl;
 
       auto children = udt->findAllChildren();
       if (!children || children->getChildCount() == 0) {
@@ -439,7 +462,7 @@ lldb::TypeSP PDBASTParser::CreateLLDBTypeFromPDBType(const PDBSymbol &type) {
       } else {
         // Add the type to the forward declarations. It will help us to avoid
         // an endless recursion in CompleteTypeFromUdt function.
-        m_forward_decl_to_uid[record_decl] = type.getSymIndexId();
+        m_forward_decl_to_uid[cached_decl] = type.getSymIndexId();
 
         TypeSystemClang::SetHasExternalStorage(clang_type.GetOpaqueQualType(),
                                                true);
@@ -792,11 +815,21 @@ bool PDBASTParser::CompleteTypeFromPDB(
   if (GetClangASTImporter().CanImport(compiler_type))
     return GetClangASTImporter().CompleteType(compiler_type);
 
+  clang::NamedDecl *lookup_decl;
+  if (TypeSystemClang::IsObjCObjectOrInterfaceType(compiler_type)) {
+    // Start definition now that we resolve the entire type info
+    clang::ObjCInterfaceDecl *decl =
+        m_ast.GetAsObjCInterfaceDecl(compiler_type);
+    assert(!decl->hasDefinition() && "Definition must not have started");
+    TypeSystemClang::StartTagDeclarationDefinition(compiler_type);
+    lookup_decl = decl;
+  } else {
+    lookup_decl = m_ast.GetAsCXXRecordDecl(compiler_type.GetOpaqueQualType());
+  }
+
   // Remove the type from the forward declarations to avoid
   // an endless recursion for types like a linked list.
-  clang::CXXRecordDecl *record_decl =
-      m_ast.GetAsCXXRecordDecl(compiler_type.GetOpaqueQualType());
-  auto uid_it = m_forward_decl_to_uid.find(record_decl);
+  auto uid_it = m_forward_decl_to_uid.find(lookup_decl);
   if (uid_it == m_forward_decl_to_uid.end())
     return true;
 
