@@ -182,8 +182,7 @@ static ConstString GetPDBBuiltinTypeName(const PDBSymbolTypeBuiltin &pdb_type,
   return compiler_type.GetTypeName();
 }
 
-static bool GetDeclarationForSymbol(const PDBSymbol &symbol,
-                                    Declaration &decl) {
+static bool AddSourceInfoToDecl(const PDBSymbol &symbol, Declaration &decl) {
   auto &raw_sym = symbol.getRawSymbol();
   auto first_line_up = raw_sym.getSrcLineOnTypeDefn();
 
@@ -456,7 +455,7 @@ lldb::TypeSP PDBASTParser::CreateLLDBTypeFromPDBType(const PDBSymbol &type) {
     if (udt->isVolatileType())
       clang_type = clang_type.AddVolatileModifier();
 
-    GetDeclarationForSymbol(type, decl);
+    AddSourceInfoToDecl(type, decl);
     return std::make_shared<lldb_private::Type>(
         type.getSymIndexId(), m_ast.GetSymbolFile(), ConstString(name),
         udt->getLength(), nullptr, LLDB_INVALID_UID,
@@ -526,7 +525,7 @@ lldb::TypeSP PDBASTParser::CreateLLDBTypeFromPDBType(const PDBSymbol &type) {
     if (enum_type->isVolatileType())
       ast_enum = ast_enum.AddVolatileModifier();
 
-    GetDeclarationForSymbol(type, decl);
+    AddSourceInfoToDecl(type, decl);
     return std::make_shared<lldb_private::Type>(
         type.getSymIndexId(), m_ast.GetSymbolFile(), ConstString(name), bytes,
         nullptr, LLDB_INVALID_UID, lldb_private::Type::eEncodingIsUID, decl,
@@ -572,7 +571,7 @@ lldb::TypeSP PDBASTParser::CreateLLDBTypeFromPDBType(const PDBSymbol &type) {
     if (type_def->isVolatileType())
       ast_typedef = ast_typedef.AddVolatileModifier();
 
-    GetDeclarationForSymbol(type, decl);
+    AddSourceInfoToDecl(type, decl);
     llvm::Optional<uint64_t> size;
     if (type_def->getLength())
       size = type_def->getLength();
@@ -653,7 +652,7 @@ lldb::TypeSP PDBASTParser::CreateLLDBTypeFromPDBType(const PDBSymbol &type) {
         m_ast.CreateFunctionType(return_ast_type, arg_list.data(),
                                  arg_list.size(), is_variadic, type_quals, cc);
 
-    GetDeclarationForSymbol(type, decl);
+    AddSourceInfoToDecl(type, decl);
     return std::make_shared<lldb_private::Type>(
         type.getSymIndexId(), m_ast.GetSymbolFile(), ConstString(name),
         llvm::None, nullptr, LLDB_INVALID_UID,
