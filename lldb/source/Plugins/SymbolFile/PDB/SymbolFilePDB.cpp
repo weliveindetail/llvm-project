@@ -46,6 +46,7 @@
 #include "llvm/DebugInfo/PDB/PDBSymbolFuncDebugEnd.h"
 #include "llvm/DebugInfo/PDB/PDBSymbolFuncDebugStart.h"
 #include "llvm/DebugInfo/PDB/PDBSymbolPublicSymbol.h"
+#include "llvm/DebugInfo/PDB/PDBSymbolTypeBaseClass.h"
 #include "llvm/DebugInfo/PDB/PDBSymbolTypeBuiltin.h"
 #include "llvm/DebugInfo/PDB/PDBSymbolTypeEnum.h"
 #include "llvm/DebugInfo/PDB/PDBSymbolTypeFunctionSig.h"
@@ -2069,4 +2070,55 @@ uint32_t SymbolFilePDB::GetCompilandId(const llvm::pdb::PDBSymbolData &data) {
   }
 
   return 0;
+}
+
+bool SymbolFilePDB::IsaNSObjectOrNSProxy(const PDBSymbolTypeUDT &pdb_udt) const {
+  if (pdb_udt.getName() == "NSObject")
+    return true;
+  if (pdb_udt.getName() == "NSProxy")
+    return true;
+
+  auto bases_up = pdb_udt.findAllChildren<PDBSymbolTypeBaseClass>();
+  std::unique_ptr<llvm::pdb::PDBSymbolTypeBaseClass> pdb_base_up = bases_up->getNext();
+  if (!pdb_base_up)
+    return false; // No further bases classes (we assume it's C/C++)
+
+  if (bases_up->getNext())
+    return false; // ObjC has single inheritance only (this must be C/C++)
+
+  user_id_t base_uid = pdb_base_up->getRawSymbol().getTypeId();
+  std::unique_ptr<PDBSymbol> pdb_base_raw_up = m_session_up->getSymbolById(base_uid);
+  if (pdb_base_raw_up->getSymTag() != PDB_SymType::UDT)
+    return false; // Error: base class is not a user-defined type
+
+  auto *pdb_base_udt = llvm::dyn_cast<PDBSymbolTypeUDT>(pdb_base_raw_up.get());
+  return IsaNSObjectOrNSProxy(*pdb_base_udt);
+}
+
+bool SymbolFilePDB::IsObjCBuiltinTypeId(user_id_t sym_uid) const {
+  std::unique_ptr<PDBSymbol> pdb_sym_up = m_session_up->getSymbolById(sym_uid);
+  if (pdb_sym_up->getSymTag() != PDB_SymType::UDT)
+    return false;
+
+  auto *pdb_sym_udt = llvm::dyn_cast<PDBSymbolTypeUDT>(pdb_sym_up.get());
+  if (pdb_sym_udt->getName() != "id" &&
+      pdb_sym_udt->getName() != "objc_object")
+    return false;
+
+  return true;
+}
+
+bool SymbolFilePDB::IsObjCBuiltinTypeSel(user_id_t sym_uid) const {
+  std::unique_ptr<PDBSymbol> pdb_sym_up = m_session_up->getSymbolById(sym_uid);
+  if (pdb_sym_up->getSymTag() != PDB_SymType::UDT)
+    return false;
+
+  auto *pdb_sym_udt = llvm::dyn_cast<PDBSymbolTypeUDT>(pdb_sym_up.get());
+  if (pdb_sym_udt->getName() != "objc_selector")
+    return false;
+
+  // TODO: ObjC selectors exist only for ObjC functions and they never occur
+  // freestanding. Thus, we know that all instances of this UDT are defined
+  // within ObjCInterfaceDecls. Can we add a check for that?
+  return true;
 }

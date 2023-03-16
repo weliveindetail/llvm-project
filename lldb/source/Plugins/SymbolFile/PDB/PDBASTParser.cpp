@@ -22,7 +22,7 @@
 #include "lldb/Symbol/SymbolFile.h"
 #include "lldb/Symbol/TypeMap.h"
 #include "lldb/Symbol/TypeSystem.h"
-#include "lldb/Utility/LLDBLog.h"
+#include "lldb/Target/Language.h"
 #include "llvm/DebugInfo/PDB/ConcreteSymbolEnumerator.h"
 #include "llvm/DebugInfo/PDB/IPDBLineNumber.h"
 #include "llvm/DebugInfo/PDB/IPDBSourceFile.h"
@@ -40,6 +40,8 @@
 #include "llvm/DebugInfo/PDB/PDBSymbolTypeUDT.h"
 
 #include "Plugins/Language/CPlusPlus/MSVCUndecoratedNameParser.h"
+#include "Plugins/Language/ObjC/ObjCLanguage.h"
+
 #include <optional>
 
 using namespace lldb;
@@ -342,6 +344,10 @@ static bool IsAnonymousNamespaceName(llvm::StringRef name) {
   return name == "`anonymous namespace'" || name == "`anonymous-namespace'";
 }
 
+static bool IsSpecialNameObjC(llvm::StringRef name) {
+  return name == "objc_object" || name == "objc_class";
+}
+
 static clang::CallingConv TranslateCallingConvention(PDB_CallingConv pdb_cc) {
   switch (pdb_cc) {
   case llvm::codeview::CallingConvention::NearC:
@@ -400,15 +406,33 @@ lldb::TypeSP PDBASTParser::CreateLLDBTypeFromPDBType(const PDBSymbol &type) {
     if (name.empty())
       return nullptr;
 
+    // Some UDT with trival ctor has zero length. Just ignore.
+    if (udt->getLength() == 0 && !IsSpecialNameObjC(name))
+      return nullptr;
+
     auto decl_context = GetDeclContextContainingSymbol(type);
+
+    // PDB has no attribute to encode the language per symbol. We assume
+    // all ObjCInterfaceDecls to derive from either NSObject or NSProxy.
+    LanguageType lang = eLanguageTypeC_plus_plus;
+    auto *symbol_file = static_cast<SymbolFilePDB *>(m_ast.GetSymbolFile());
+    if (symbol_file->IsaNSObjectOrNSProxy(*udt))
+      lang = eLanguageTypeObjC;
 
     // Check if such an UDT already exists in the current context.
     // This may occur with const or volatile types. There are separate type
     // symbols in PDB for types with const or volatile modifiers, but we need
     // to create only one declaration for them all.
+    CompilerType clang_type;
+    if (lang == eLanguageTypeObjC) {
+        clang_type = m_ast.GetTypeForIdentifier<clang::ObjCInterfaceDecl>(ConstString(name),
+                                                                          decl_context);
+    } else {
+        clang_type = m_ast.GetTypeForIdentifier<clang::CXXRecordDecl>(ConstString(name),
+                                                                      decl_context);
+    }
+
     Type::ResolveState type_resolve_state;
-    CompilerType clang_type = m_ast.GetTypeForIdentifier<clang::CXXRecordDecl>(
-        ConstString(name), decl_context);
     if (!clang_type.IsValid()) {
       auto access = GetAccessibilityForUdt(*udt);
 
@@ -420,19 +444,25 @@ lldb::TypeSP PDBASTParser::CreateLLDBTypeFromPDBType(const PDBSymbol &type) {
 
       clang_type = m_ast.CreateRecordType(
           decl_context, OptionalClangModuleID(), access, name, tag_type_kind,
-          lldb::eLanguageTypeC_plus_plus, &metadata);
+          lang, &metadata);
       assert(clang_type.IsValid());
 
-      auto record_decl =
-          m_ast.GetAsCXXRecordDecl(clang_type.GetOpaqueQualType());
-      assert(record_decl);
-      m_uid_to_decl[type.getSymIndexId()] = record_decl;
+      clang::NamedDecl *cached_decl;
+      if (TypeSystemClang::IsObjCObjectOrInterfaceType(clang_type)) {
+        // We start the declaration definition only once the full compiler type
+        // is requested since the underlying decls for ObjC types respond to
+        // isCompleteDefinition().
+        cached_decl = m_ast.GetAsObjCInterfaceDecl(clang_type);
+      } else {
+        cached_decl = m_ast.GetAsCXXRecordDecl(clang_type.GetOpaqueQualType());
+        cached_decl->addAttr(
+            clang::MSInheritanceAttr::CreateImplicit(
+                m_ast.getASTContext(), GetMSInheritance(*udt)));
 
-      auto inheritance_attr = clang::MSInheritanceAttr::CreateImplicit(
-          m_ast.getASTContext(), GetMSInheritance(*udt));
-      record_decl->addAttr(inheritance_attr);
+        TypeSystemClang::StartTagDeclarationDefinition(clang_type);
+      }
 
-      TypeSystemClang::StartTagDeclarationDefinition(clang_type);
+      m_uid_to_decl[type.getSymIndexId()] = cached_decl;
 
       auto children = udt->findAllChildren();
       if (!children || children->getChildCount() == 0) {
@@ -447,7 +477,7 @@ lldb::TypeSP PDBASTParser::CreateLLDBTypeFromPDBType(const PDBSymbol &type) {
       } else {
         // Add the type to the forward declarations. It will help us to avoid
         // an endless recursion in CompleteTypeFromUdt function.
-        m_forward_decl_to_uid[record_decl] = type.getSymIndexId();
+        m_forward_decl_to_uid[cached_decl] = type.getSymIndexId();
 
         TypeSystemClang::SetHasExternalStorage(clang_type.GetOpaqueQualType(),
                                                true);
@@ -734,12 +764,32 @@ lldb::TypeSP PDBASTParser::CreateLLDBTypeFromPDBType(const PDBSymbol &type) {
     auto *pointer_type = llvm::dyn_cast<PDBSymbolTypePointer>(&type);
     assert(pointer_type);
 
-    SymbolFile *symbol_file = m_ast.GetSymbolFile();
+    auto *symbol_file = static_cast<SymbolFilePDB *>(m_ast.GetSymbolFile());
     if (!symbol_file)
       return nullptr;
 
-    Type *pointee_type = symbol_file->ResolveTypeUID(
-        pointer_type->getPointeeType()->getSymIndexId());
+    auto pdb_pointee_type = pointer_type->getPointeeType()->getSymIndexId();
+    if (symbol_file->IsObjCBuiltinTypeId(pdb_pointee_type)) {
+      // Clang emits id as objc_object* and we fill in the built-in "id" type
+      CompilerType id_type = m_ast.GetBasicType(eBasicTypeObjCID);
+      AddSourceInfoToDecl(type, decl);
+      return symbol_file->MakeType(
+          pointer_type->getSymIndexId(), ConstString("id"),
+          pointer_type->getLength(), nullptr, pdb_pointee_type,
+          lldb_private::Type::eEncodingIsUID, decl, id_type,
+          lldb_private::Type::ResolveState::Full);
+    }
+    if (symbol_file->IsObjCBuiltinTypeSel(pdb_pointee_type)) {
+      CompilerType id_type = m_ast.GetBasicType(eBasicTypeObjCSel);
+      AddSourceInfoToDecl(type, decl);
+      return symbol_file->MakeType(
+          pointer_type->getSymIndexId(), ConstString("SEL"),
+          pointer_type->getLength(), nullptr, pdb_pointee_type,
+          lldb_private::Type::eEncodingIsUID, decl, id_type,
+          lldb_private::Type::ResolveState::Full);
+    }
+
+    Type *pointee_type = symbol_file->ResolveTypeUID(pdb_pointee_type);
     if (!pointee_type)
       return nullptr;
 
@@ -755,7 +805,7 @@ lldb::TypeSP PDBASTParser::CreateLLDBTypeFromPDBType(const PDBSymbol &type) {
           pointee_type->GetForwardCompilerType());
       assert(pointer_ast_type);
 
-      return m_ast.GetSymbolFile()->MakeType(
+      return symbol_file->MakeType(
           pointer_type->getSymIndexId(), ConstString(),
           pointer_type->getLength(), nullptr, LLDB_INVALID_UID,
           lldb_private::Type::eEncodingIsUID, decl, pointer_ast_type,
@@ -780,7 +830,7 @@ lldb::TypeSP PDBASTParser::CreateLLDBTypeFromPDBType(const PDBSymbol &type) {
     if (pointer_type->isRestrictedType())
       pointer_ast_type = pointer_ast_type.AddRestrictModifier();
 
-    return m_ast.GetSymbolFile()->MakeType(
+    return symbol_file->MakeType(
         pointer_type->getSymIndexId(), ConstString(), pointer_type->getLength(),
         nullptr, LLDB_INVALID_UID, lldb_private::Type::eEncodingIsUID, decl,
         pointer_ast_type, lldb_private::Type::ResolveState::Full);
@@ -796,11 +846,20 @@ bool PDBASTParser::CompleteTypeFromPDB(
   if (GetClangASTImporter().CanImport(compiler_type))
     return GetClangASTImporter().CompleteType(compiler_type);
 
+  clang::NamedDecl *lookup_decl;
+  if (TypeSystemClang::IsObjCObjectOrInterfaceType(compiler_type)) {
+    // Start definition now that we resolve the entire type info
+    clang::ObjCInterfaceDecl *decl = m_ast.GetAsObjCInterfaceDecl(compiler_type);
+    assert(!decl->hasDefinition() && "Definition must not have started");
+    TypeSystemClang::StartTagDeclarationDefinition(compiler_type);
+    lookup_decl = decl;
+  } else {
+    lookup_decl = m_ast.GetAsCXXRecordDecl(compiler_type.GetOpaqueQualType());
+  }
+
   // Remove the type from the forward declarations to avoid
   // an endless recursion for types like a linked list.
-  clang::CXXRecordDecl *record_decl =
-      m_ast.GetAsCXXRecordDecl(compiler_type.GetOpaqueQualType());
-  auto uid_it = m_forward_decl_to_uid.find(record_decl);
+  auto uid_it = m_forward_decl_to_uid.find(lookup_decl);
   if (uid_it == m_forward_decl_to_uid.end())
     return true;
 
@@ -1228,6 +1287,7 @@ bool PDBASTParser::CompleteTypeFromUDT(
   TypeSystemClang::BuildIndirectFields(compiler_type);
   TypeSystemClang::CompleteTagDeclarationDefinition(compiler_type);
 
+  // The AST importer can only handle C++ RecordTypes
   clang::CXXRecordDecl *record_decl =
       m_ast.GetAsCXXRecordDecl(compiler_type.GetOpaqueQualType());
   if (!record_decl)
@@ -1374,6 +1434,12 @@ void PDBASTParser::AddRecordBases(
         TypeSystemClang::CompleteTagDeclarationDefinition(base_comp_type);
     }
 
+    if (TypeSystemClang::IsObjCObjectOrInterfaceType(base_comp_type)) {
+      m_ast.SetObjCSuperClass(record_type, base_comp_type);
+      assert(bases_enum.getNext() == nullptr && "Single inheritance only");
+      return;
+    }
+
     auto access = TranslateMemberAccess(base->getAccess());
 
     auto is_virtual = base->isVirtualBaseClass();
@@ -1389,7 +1455,8 @@ void PDBASTParser::AddRecordBases(
     if (is_virtual)
       continue;
 
-    auto decl = m_ast.GetAsCXXRecordDecl(base_comp_type.GetOpaqueQualType());
+    // The AST importer can only handle C++ RecordTypes
+    auto *decl = m_ast.GetAsCXXRecordDecl(base_comp_type.GetOpaqueQualType());
     if (!decl)
       continue;
 
