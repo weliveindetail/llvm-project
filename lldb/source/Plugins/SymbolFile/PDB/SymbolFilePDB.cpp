@@ -2088,3 +2088,31 @@ bool SymbolFilePDB::IsaNSObjectOrNSProxy(
   auto *pdb_base_udt = llvm::dyn_cast<PDBSymbolTypeUDT>(pdb_base_raw_up.get());
   return IsaNSObjectOrNSProxy(*pdb_base_udt);
 }
+
+bool SymbolFilePDB::IsObjCBuiltinTypeId(user_id_t sym_uid) const {
+  std::unique_ptr<PDBSymbol> pdb_sym_up = m_session_up->getSymbolById(sym_uid);
+  if (pdb_sym_up->getSymTag() != PDB_SymType::UDT)
+    return false;
+
+  auto *pdb_sym_udt = llvm::dyn_cast<PDBSymbolTypeUDT>(pdb_sym_up.get());
+  if (pdb_sym_udt->getName() != "id" &&
+      pdb_sym_udt->getName() != "objc_object")
+    return false;
+
+  return true;
+}
+
+bool SymbolFilePDB::IsObjCBuiltinTypeSel(user_id_t sym_uid) const {
+  std::unique_ptr<PDBSymbol> pdb_sym_up = m_session_up->getSymbolById(sym_uid);
+  if (pdb_sym_up->getSymTag() != PDB_SymType::UDT)
+    return false;
+
+  auto *pdb_sym_udt = llvm::dyn_cast<PDBSymbolTypeUDT>(pdb_sym_up.get());
+  if (pdb_sym_udt->getName() != "objc_selector")
+    return false;
+
+  // TODO: ObjC selectors exist only for ObjC functions and they never occur
+  // freestanding. Thus, we know that all instances of this UDT are defined
+  // within ObjCInterfaceDecls. Can we add a check for that?
+  return true;
+}
