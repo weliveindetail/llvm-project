@@ -41,26 +41,30 @@ __attribute__((objc_root_class))
 }
 @end
 
-// RUN: %lldb -b -o "b objc-gnustep-print-pdb.m:67" -o "run" -o "p ptr" -o "p *ptr" -- %t | FileCheck %s
+// RUN: %lldb -b -o "b objc-gnustep-print-pdb.m:72" -o "run" -o "p ptr" -o "p *ptr" -- %t | FileCheck %s
 //
-// CHECK: (lldb) b objc-gnustep-print-pdb.m:67
-// CHECK: Breakpoint {{.*}} at objc-gnustep-print-pdb.m:67
+// CHECK: (lldb) b objc-gnustep-print-pdb.m:72
+// CHECK: Breakpoint {{.*}} at objc-gnustep-print-pdb.m:72
 //
 // CHECK: (lldb) run
 // CHECK: Process {{[0-9]+}} stopped
-// CHECK: frame #0: {{.*}}`main  at objc-gnustep-print-pdb.m:67
+// CHECK: frame #0: {{.*}}`main  at objc-gnustep-print-pdb.m:72
 //
 // CHECK: (lldb) p ptr
 // CHECK: (TestObj *) $0 = 0x{{[0-9]+}}
 //
 // CHECK: (lldb) p *ptr
 // CHECK: (TestObj) $1 = {
-// CHECK:   _int
-// CHECK:   _float
-// CHECK:   _char
-// CHECK:   _ptr_void
-// CHECK:   _ptr_nsobject
-// CHECK:   _id_objc
+// CHECK:   NSObject = {
+// CHECK:     isa = 0x{{[0-9]+}}
+// CHECK:     refcount
+// CHECK:   }
+// CHECK:   _int = 0
+// CHECK:   _float = 0
+// CHECK:   _char = '\0'
+// CHECK:   _ptr_void = 0x{{0+}}
+// CHECK:   _ptr_nsobject = nil
+// CHECK:   _id_objc = nil
 // CHECK: }
 
 int main() {
