@@ -170,6 +170,8 @@ public:
   void DumpClangAST(lldb_private::Stream &s) override;
 
   bool IsaNSObjectOrNSProxy(const llvm::pdb::PDBSymbolTypeUDT &udt) const;
+  bool IsObjCBuiltinTypeId(lldb::user_id_t sym_uid) const;
+  bool IsObjCBuiltinTypeSel(lldb::user_id_t sym_uid) const;
 
 private:
   struct SecContribInfo {
