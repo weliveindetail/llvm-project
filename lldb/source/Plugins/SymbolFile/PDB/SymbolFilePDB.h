@@ -84,6 +84,8 @@ public:
   ParseVariablesForContext(const lldb_private::SymbolContext &sc) override;
 
   lldb_private::Type *ResolveTypeUID(lldb::user_id_t type_uid) override;
+  lldb_private::Type *ResolveTypeUID(lldb::user_id_t type_uid, lldb::LanguageType lang);
+
   std::optional<ArrayInfo> GetDynamicArrayInfoForUID(
       lldb::user_id_t type_uid,
       const lldb_private::ExecutionContext *exe_ctx) override;
@@ -169,6 +171,12 @@ public:
 
   void DumpClangAST(lldb_private::Stream &s) override;
 
+  uint32_t GetCompilandId(const llvm::pdb::PDBSymbolData &data);
+  lldb::CompUnitSP getCompileUnitByUID(lldb::user_id_t sym_uid);
+
+  lldb::LanguageType getCompileUnitLanguage(const llvm::pdb::PDBSymbolData &pdb_data);
+  lldb::LanguageType getCompileUnitLanguage(const llvm::pdb::PDBSymbolFunc &pdb_func);
+
   bool IsaNSObjectOrNSProxy(const llvm::pdb::PDBSymbolTypeUDT &udt) const;
   bool IsObjCBuiltinTypeId(lldb::user_id_t sym_uid) const;
   bool IsObjCBuiltinTypeSel(lldb::user_id_t sym_uid) const;
@@ -225,7 +233,7 @@ private:
   void GetCompileUnitIndex(const llvm::pdb::PDBSymbolCompiland &pdb_compiland,
                            uint32_t &index);
 
-  PDBASTParser *GetPDBAstParser();
+  PDBASTParser *GetPDBAstParser(lldb::LanguageType lang);
 
   std::unique_ptr<llvm::pdb::PDBSymbolCompiland>
   GetPDBCompilandByUID(uint32_t uid);
@@ -244,8 +252,6 @@ private:
 
   bool DeclContextMatchesThisSymbolFile(
       const lldb_private::CompilerDeclContext &decl_ctx);
-
-  uint32_t GetCompilandId(const llvm::pdb::PDBSymbolData &data);
 
   llvm::DenseMap<uint32_t, lldb::CompUnitSP> m_comp_units;
   llvm::DenseMap<uint32_t, lldb::TypeSP> m_types;

@@ -19,6 +19,7 @@
 #include "Plugins/TypeSystem/Clang/TypeSystemClang.h"
 #include "lldb/Core/Declaration.h"
 #include "lldb/Core/Module.h"
+#include "lldb/Symbol/CompileUnit.h"
 #include "lldb/Symbol/SymbolFile.h"
 #include "lldb/Symbol/TypeMap.h"
 #include "lldb/Symbol/TypeSystem.h"
@@ -375,15 +376,15 @@ PDBASTParser::~PDBASTParser() = default;
 
 // DebugInfoASTParser interface
 
-lldb::TypeSP PDBASTParser::CreateLLDBTypeFromPDBType(const PDBSymbol &type) {
+lldb::TypeSP PDBASTParser::CreateLLDBTypeFromPDBType(const PDBSymbol &type, LanguageType cu_lang) {
   Declaration decl;
   switch (type.getSymTag()) {
   case PDB_SymType::BaseClass: {
-    auto symbol_file = m_ast.GetSymbolFile();
+    auto *symbol_file = static_cast<SymbolFilePDB *>(m_ast.GetSymbolFile());
     if (!symbol_file)
       return nullptr;
 
-    auto ty = symbol_file->ResolveTypeUID(type.getRawSymbol().getTypeId());
+    auto ty = symbol_file->ResolveTypeUID(type.getRawSymbol().getTypeId(), cu_lang);
     return ty ? ty->shared_from_this() : nullptr;
   } break;
   case PDB_SymType::UDT: {
@@ -569,12 +570,12 @@ lldb::TypeSP PDBASTParser::CreateLLDBTypeFromPDBType(const PDBSymbol &type) {
     auto type_def = llvm::dyn_cast<PDBSymbolTypeTypedef>(&type);
     assert(type_def);
 
-    SymbolFile *symbol_file = m_ast.GetSymbolFile();
+    auto *symbol_file = static_cast<SymbolFilePDB *>(m_ast.GetSymbolFile());
     if (!symbol_file)
       return nullptr;
 
     lldb_private::Type *target_type =
-        symbol_file->ResolveTypeUID(type_def->getTypeId());
+        symbol_file->ResolveTypeUID(type_def->getTypeId(), cu_lang);
     if (!target_type)
       return nullptr;
 
@@ -618,6 +619,11 @@ lldb::TypeSP PDBASTParser::CreateLLDBTypeFromPDBType(const PDBSymbol &type) {
   case PDB_SymType::FunctionSig: {
     std::string name;
     PDBSymbolTypeFunctionSig *func_sig = nullptr;
+
+    auto *symbol_file = static_cast<SymbolFilePDB *>(m_ast.GetSymbolFile());
+    if (!symbol_file)
+      return nullptr;
+
     if (auto pdb_func = llvm::dyn_cast<PDBSymbolFunc>(&type)) {
       if (pdb_func->isCompilerGenerated())
         return nullptr;
@@ -627,8 +633,12 @@ lldb::TypeSP PDBASTParser::CreateLLDBTypeFromPDBType(const PDBSymbol &type) {
         return nullptr;
       func_sig = sig.release();
       // Function type is named.
-      name = std::string(
-          MSVCUndecoratedNameParser::DropScope(pdb_func->getName()));
+      LanguageType lang = symbol_file->getCompileUnitLanguage(*pdb_func);
+      if (lang == eLanguageTypeObjC || lang == eLanguageTypeObjC_plus_plus) {
+        name = pdb_func->getName(); // e.g.: "-[Foo setAll]"
+      } else {
+        name = MSVCUndecoratedNameParser::DropScope(pdb_func->getName()).str();
+      }
     } else if (auto pdb_func_sig =
                    llvm::dyn_cast<PDBSymbolTypeFunctionSig>(&type)) {
       func_sig = const_cast<PDBSymbolTypeFunctionSig *>(pdb_func_sig);
@@ -648,12 +658,8 @@ lldb::TypeSP PDBASTParser::CreateLLDBTypeFromPDBType(const PDBSymbol &type) {
       if (!arg)
         break;
 
-      SymbolFile *symbol_file = m_ast.GetSymbolFile();
-      if (!symbol_file)
-        return nullptr;
-
       lldb_private::Type *arg_type =
-          symbol_file->ResolveTypeUID(arg->getSymIndexId());
+          symbol_file->ResolveTypeUID(arg->getSymIndexId(), cu_lang);
       // If there's some error looking up one of the dependent types of this
       // function signature, bail.
       if (!arg_type)
@@ -664,12 +670,8 @@ lldb::TypeSP PDBASTParser::CreateLLDBTypeFromPDBType(const PDBSymbol &type) {
     lldbassert(arg_list.size() <= num_args);
 
     auto pdb_return_type = func_sig->getReturnType();
-    SymbolFile *symbol_file = m_ast.GetSymbolFile();
-    if (!symbol_file)
-      return nullptr;
-
     lldb_private::Type *return_type =
-        symbol_file->ResolveTypeUID(pdb_return_type->getSymIndexId());
+        symbol_file->ResolveTypeUID(pdb_return_type->getSymIndexId(), cu_lang);
     // If there's some error looking up one of the dependent types of this
     // function signature, bail.
     if (!return_type)
@@ -700,13 +702,13 @@ lldb::TypeSP PDBASTParser::CreateLLDBTypeFromPDBType(const PDBSymbol &type) {
     if (uint64_t size = array_type->getLength())
       bytes = size;
 
-    SymbolFile *symbol_file = m_ast.GetSymbolFile();
+    auto *symbol_file = static_cast<SymbolFilePDB *>(m_ast.GetSymbolFile());
     if (!symbol_file)
       return nullptr;
 
     // If array rank > 0, PDB gives the element type at N=0. So element type
     // will parsed in the order N=0, N=1,..., N=rank sequentially.
-    lldb_private::Type *element_type = symbol_file->ResolveTypeUID(element_uid);
+    lldb_private::Type *element_type = symbol_file->ResolveTypeUID(element_uid, cu_lang);
     if (!element_type)
       return nullptr;
 
@@ -793,7 +795,7 @@ lldb::TypeSP PDBASTParser::CreateLLDBTypeFromPDBType(const PDBSymbol &type) {
     if (pointer_type->isPointerToDataMember() ||
         pointer_type->isPointerToMemberFunction()) {
       auto class_parent_uid = pointer_type->getRawSymbol().getClassParentId();
-      auto class_parent_type = symbol_file->ResolveTypeUID(class_parent_uid);
+      auto class_parent_type = symbol_file->ResolveTypeUID(class_parent_uid, cu_lang);
       assert(class_parent_type);
 
       CompilerType pointer_ast_type;
@@ -802,7 +804,7 @@ lldb::TypeSP PDBASTParser::CreateLLDBTypeFromPDBType(const PDBSymbol &type) {
           pointee_type->GetForwardCompilerType());
       assert(pointer_ast_type);
 
-      return m_ast.GetSymbolFile()->MakeType(
+      return symbol_file->MakeType(
           pointer_type->getSymIndexId(), ConstString(),
           pointer_type->getLength(), nullptr, LLDB_INVALID_UID,
           lldb_private::Type::eEncodingIsUID, decl, pointer_ast_type,
@@ -827,9 +829,9 @@ lldb::TypeSP PDBASTParser::CreateLLDBTypeFromPDBType(const PDBSymbol &type) {
     if (pointer_type->isRestrictedType())
       pointer_ast_type = pointer_ast_type.AddRestrictModifier();
 
-    return m_ast.GetSymbolFile()->MakeType(
+    return symbol_file->MakeType(
         pointer_type->getSymIndexId(), ConstString(), pointer_type->getLength(),
-        nullptr, LLDB_INVALID_UID, lldb_private::Type::eEncodingIsUID, decl,
+        nullptr, pdb_pointee_type, lldb_private::Type::eEncodingIsUID, decl,
         pointer_ast_type, lldb_private::Type::ResolveState::Full);
   } break;
   default:
@@ -860,7 +862,7 @@ bool PDBASTParser::CompleteTypeFromPDB(
   if (uid_it == m_forward_decl_to_uid.end())
     return true;
 
-  auto symbol_file = static_cast<SymbolFilePDB *>(
+  auto *symbol_file = static_cast<SymbolFilePDB *>(
       m_ast.GetSymbolFile()->GetBackingSymbolFile());
   if (!symbol_file)
     return false;
@@ -889,7 +891,7 @@ bool PDBASTParser::CompleteTypeFromPDB(
 }
 
 clang::Decl *
-PDBASTParser::GetDeclForSymbol(const llvm::pdb::PDBSymbol &symbol) {
+PDBASTParser::GetDeclForSymbol(const llvm::pdb::PDBSymbol &symbol, lldb::LanguageType cu_lang) {
   uint32_t sym_id = symbol.getSymIndexId();
   auto it = m_uid_to_decl.find(sym_id);
   if (it != m_uid_to_decl.end())
@@ -910,7 +912,7 @@ PDBASTParser::GetDeclForSymbol(const llvm::pdb::PDBSymbol &symbol) {
     auto class_parent_id = raw.getClassParentId();
     if (std::unique_ptr<PDBSymbol> class_parent =
             session.getSymbolById(class_parent_id)) {
-      auto class_parent_type = symbol_file->ResolveTypeUID(class_parent_id);
+      auto *class_parent_type = symbol_file->ResolveTypeUID(class_parent_id, cu_lang);
       if (!class_parent_type)
         return nullptr;
 
@@ -945,7 +947,7 @@ PDBASTParser::GetDeclForSymbol(const llvm::pdb::PDBSymbol &symbol) {
         // If no class methods with the same RVA were found, then create a new
         // method. It is possible for template methods.
         if (!decl)
-          decl = AddRecordMethod(*symbol_file, class_parent_ct, *func);
+          decl = AddRecordMethod(*symbol_file, class_parent_ct, *func, cu_lang);
       }
 
       if (decl)
@@ -980,7 +982,8 @@ PDBASTParser::GetDeclForSymbol(const llvm::pdb::PDBSymbol &symbol) {
     clang::Decl *decl =
         GetDeclFromContextByName(m_ast.getASTContext(), *decl_context, name);
     if (!decl) {
-      auto type = symbol_file->ResolveTypeUID(data->getTypeId());
+      LanguageType lang = symbol_file->getCompileUnitLanguage(*data);
+      auto type = symbol_file->ResolveTypeUID(data->getTypeId(), lang);
       if (!type)
         return nullptr;
 
@@ -1003,7 +1006,8 @@ PDBASTParser::GetDeclForSymbol(const llvm::pdb::PDBSymbol &symbol) {
     std::string name =
         std::string(MSVCUndecoratedNameParser::DropScope(func->getName()));
 
-    Type *type = symbol_file->ResolveTypeUID(sym_id);
+    CompUnitSP comp_unit = symbol_file->getCompileUnitByUID(func->getSymIndexId());
+    Type *type = symbol_file->ResolveTypeUID(sym_id, comp_unit->GetLanguage());
     if (!type)
       return nullptr;
 
@@ -1020,7 +1024,7 @@ PDBASTParser::GetDeclForSymbol(const llvm::pdb::PDBSymbol &symbol) {
               arg_enum = sig->findAllChildren<PDBSymbolTypeFunctionArg>()) {
         while (std::unique_ptr<PDBSymbolTypeFunctionArg> arg =
                    arg_enum->getNext()) {
-          Type *arg_type = symbol_file->ResolveTypeUID(arg->getTypeId());
+          Type *arg_type = symbol_file->ResolveTypeUID(arg->getTypeId(), comp_unit->GetLanguage());
           if (!arg_type)
             continue;
 
@@ -1052,20 +1056,21 @@ PDBASTParser::GetDeclForSymbol(const llvm::pdb::PDBSymbol &symbol) {
 
 clang::DeclContext *
 PDBASTParser::GetDeclContextForSymbol(const llvm::pdb::PDBSymbol &symbol) {
-  if (symbol.getSymTag() == PDB_SymType::Function) {
+  auto *symbol_file = static_cast<SymbolFilePDB *>(
+      m_ast.GetSymbolFile()->GetBackingSymbolFile());
+  if (!symbol_file)
+    return nullptr;
+
+  if (auto *pdb_func = llvm::dyn_cast<PDBSymbolFunc>(&symbol)) {
+    CompUnitSP cu = symbol_file->getCompileUnitByUID(symbol.getSymIndexId());
     clang::DeclContext *result =
-        llvm::dyn_cast_or_null<clang::FunctionDecl>(GetDeclForSymbol(symbol));
+        llvm::dyn_cast_or_null<clang::FunctionDecl>(GetDeclForSymbol(symbol, cu->GetLanguage()));
 
     if (result)
       m_decl_context_to_uid[result] = symbol.getSymIndexId();
 
     return result;
   }
-
-  auto symbol_file = static_cast<SymbolFilePDB *>(
-      m_ast.GetSymbolFile()->GetBackingSymbolFile());
-  if (!symbol_file)
-    return nullptr;
 
   auto type = symbol_file->ResolveTypeUID(symbol.getSymIndexId());
   if (!type)
@@ -1177,7 +1182,7 @@ void PDBASTParser::ParseDeclsForDeclContext(
 
   if (auto children = symbol->findAllChildren())
     while (auto child = children->getNext())
-      GetDeclForSymbol(*child);
+      GetDeclForSymbol(*child, eLanguageTypeC_plus_plus); // TODO?
 }
 
 clang::NamespaceDecl *
@@ -1255,35 +1260,40 @@ bool PDBASTParser::AddEnumValue(CompilerType enum_type,
 }
 
 bool PDBASTParser::CompleteTypeFromUDT(
-    lldb_private::SymbolFile &symbol_file,
+    SymbolFilePDB &symbol_file,
     lldb_private::CompilerType &compiler_type,
     llvm::pdb::PDBSymbolTypeUDT &udt) {
   ClangASTImporter::LayoutInfo layout_info;
   layout_info.bit_size = udt.getLength() * 8;
 
+  LanguageType lang = eLanguageTypeC_plus_plus;
+  if (TypeSystemClang::IsObjCObjectOrInterfaceType(compiler_type))
+    lang = eLanguageTypeObjC;
+
   auto nested_enums = udt.findAllChildren<PDBSymbolTypeUDT>();
   if (nested_enums)
     while (auto nested = nested_enums->getNext())
-      symbol_file.ResolveTypeUID(nested->getSymIndexId());
+      symbol_file.ResolveTypeUID(nested->getSymIndexId(), lang);
 
   auto bases_enum = udt.findAllChildren<PDBSymbolTypeBaseClass>();
   if (bases_enum)
     AddRecordBases(symbol_file, compiler_type,
                    TranslateUdtKind(udt.getUdtKind()), *bases_enum,
-                   layout_info);
+                   layout_info, lang);
 
   auto members_enum = udt.findAllChildren<PDBSymbolData>();
   if (members_enum)
-    AddRecordMembers(symbol_file, compiler_type, *members_enum, layout_info);
+    AddRecordMembers(symbol_file, compiler_type, *members_enum, layout_info, lang);
 
   auto methods_enum = udt.findAllChildren<PDBSymbolFunc>();
   if (methods_enum)
-    AddRecordMethods(symbol_file, compiler_type, *methods_enum);
+    AddRecordMethods(symbol_file, compiler_type, *methods_enum, lang);
 
   m_ast.AddMethodOverridesForCXXRecordType(compiler_type.GetOpaqueQualType());
   TypeSystemClang::BuildIndirectFields(compiler_type);
   TypeSystemClang::CompleteTagDeclarationDefinition(compiler_type);
 
+  // The AST importer can only handle C++ RecordTypes
   clang::CXXRecordDecl *record_decl =
       m_ast.GetAsCXXRecordDecl(compiler_type.GetOpaqueQualType());
   if (!record_decl)
@@ -1295,17 +1305,18 @@ bool PDBASTParser::CompleteTypeFromUDT(
 }
 
 void PDBASTParser::AddRecordMembers(
-    lldb_private::SymbolFile &symbol_file,
+    SymbolFilePDB &symbol_file,
     lldb_private::CompilerType &record_type,
     PDBDataSymbolEnumerator &members_enum,
-    lldb_private::ClangASTImporter::LayoutInfo &layout_info) {
+    lldb_private::ClangASTImporter::LayoutInfo &layout_info,
+    LanguageType lang) {
   while (auto member = members_enum.getNext()) {
     if (member->isCompilerGenerated())
       continue;
 
     auto member_name = member->getName();
 
-    auto member_type = symbol_file.ResolveTypeUID(member->getTypeId());
+    auto member_type = symbol_file.ResolveTypeUID(member->getTypeId(), lang);
     if (!member_type)
       continue;
 
@@ -1408,14 +1419,15 @@ void PDBASTParser::AddRecordMembers(
 }
 
 void PDBASTParser::AddRecordBases(
-    lldb_private::SymbolFile &symbol_file,
+    SymbolFilePDB &symbol_file,
     lldb_private::CompilerType &record_type, int record_kind,
     PDBBaseClassSymbolEnumerator &bases_enum,
-    lldb_private::ClangASTImporter::LayoutInfo &layout_info) const {
+    lldb_private::ClangASTImporter::LayoutInfo &layout_info,
+    LanguageType lang) const {
   std::vector<std::unique_ptr<clang::CXXBaseSpecifier>> base_classes;
 
   while (auto base = bases_enum.getNext()) {
-    auto base_type = symbol_file.ResolveTypeUID(base->getTypeId());
+    auto *base_type = symbol_file.ResolveTypeUID(base->getTypeId(), lang);
     if (!base_type)
       continue;
 
@@ -1451,7 +1463,8 @@ void PDBASTParser::AddRecordBases(
     if (is_virtual)
       continue;
 
-    auto decl = m_ast.GetAsCXXRecordDecl(base_comp_type.GetOpaqueQualType());
+    // The AST importer can only handle C++ RecordTypes
+    auto *decl = m_ast.GetAsCXXRecordDecl(base_comp_type.GetOpaqueQualType());
     if (!decl)
       continue;
 
@@ -1463,23 +1476,25 @@ void PDBASTParser::AddRecordBases(
                             std::move(base_classes));
 }
 
-void PDBASTParser::AddRecordMethods(lldb_private::SymbolFile &symbol_file,
+void PDBASTParser::AddRecordMethods(SymbolFilePDB &symbol_file,
                                     lldb_private::CompilerType &record_type,
-                                    PDBFuncSymbolEnumerator &methods_enum) {
+                                    PDBFuncSymbolEnumerator &methods_enum,
+                                    LanguageType lang) {
   while (std::unique_ptr<PDBSymbolFunc> method = methods_enum.getNext())
-    if (clang::CXXMethodDecl *decl =
-            AddRecordMethod(symbol_file, record_type, *method))
+    if (clang::NamedDecl *decl =
+            AddRecordMethod(symbol_file, record_type, *method, lang))
       m_uid_to_decl[method->getSymIndexId()] = decl;
 }
 
-clang::CXXMethodDecl *
-PDBASTParser::AddRecordMethod(lldb_private::SymbolFile &symbol_file,
+clang::NamedDecl *
+PDBASTParser::AddRecordMethod(SymbolFilePDB &symbol_file,
                               lldb_private::CompilerType &record_type,
-                              const llvm::pdb::PDBSymbolFunc &method) const {
+                              const llvm::pdb::PDBSymbolFunc &method,
+                              LanguageType lang) const {
   std::string name =
       std::string(MSVCUndecoratedNameParser::DropScope(method.getName()));
 
-  Type *method_type = symbol_file.ResolveTypeUID(method.getSymIndexId());
+  Type *method_type = symbol_file.ResolveTypeUID(method.getSymIndexId(), lang);
   // MSVC specific __vecDelDtor.
   if (!method_type)
     return nullptr;
