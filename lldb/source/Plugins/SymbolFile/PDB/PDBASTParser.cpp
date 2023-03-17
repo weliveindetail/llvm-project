@@ -345,6 +345,10 @@ static bool IsAnonymousNamespaceName(llvm::StringRef name) {
   return name == "`anonymous namespace'" || name == "`anonymous-namespace'";
 }
 
+static bool IsSpecialNameObjC(llvm::StringRef name) {
+  return name == "objc_object" || name == "objc_class";
+}
+
 static clang::CallingConv TranslateCallingConvention(PDB_CallingConv pdb_cc) {
   switch (pdb_cc) {
   case llvm::codeview::CallingConvention::NearC:
@@ -393,14 +397,14 @@ lldb::TypeSP PDBASTParser::CreateLLDBTypeFromPDBType(const PDBSymbol &type) {
     //    union Union { short Row; short Col; }
     // Such symbols will be handled here.
 
-    // Some UDT with trival ctor has zero length. Just ignore.
-    if (udt->getLength() == 0)
-      return nullptr;
-
     // Ignore unnamed-tag UDTs.
     std::string name =
         std::string(MSVCUndecoratedNameParser::DropScope(udt->getName()));
     if (name.empty())
+      return nullptr;
+
+    // Some UDT with trival ctor has zero length. Just ignore.
+    if (udt->getLength() == 0 && !IsSpecialNameObjC(name))
       return nullptr;
 
     auto decl_context = GetDeclContextContainingSymbol(type);
