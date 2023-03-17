@@ -761,12 +761,32 @@ lldb::TypeSP PDBASTParser::CreateLLDBTypeFromPDBType(const PDBSymbol &type) {
     auto *pointer_type = llvm::dyn_cast<PDBSymbolTypePointer>(&type);
     assert(pointer_type);
 
-    SymbolFile *symbol_file = m_ast.GetSymbolFile();
+    auto *symbol_file = static_cast<SymbolFilePDB *>(m_ast.GetSymbolFile());
     if (!symbol_file)
       return nullptr;
 
-    Type *pointee_type = symbol_file->ResolveTypeUID(
-        pointer_type->getPointeeType()->getSymIndexId());
+    auto pdb_pointee_type = pointer_type->getPointeeType()->getSymIndexId();
+    if (symbol_file->IsObjCBuiltinTypeId(pdb_pointee_type)) {
+      // Clang emits id as objc_object* and we fill in the built-in "id" type
+      CompilerType id_type = m_ast.GetBasicType(eBasicTypeObjCID);
+      AddSourceInfoToDecl(type, decl);
+      return symbol_file->MakeType(
+          pointer_type->getSymIndexId(), ConstString("id"),
+          pointer_type->getLength(), nullptr, pdb_pointee_type,
+          lldb_private::Type::eEncodingIsUID, decl, id_type,
+          lldb_private::Type::ResolveState::Full);
+    }
+    if (symbol_file->IsObjCBuiltinTypeSel(pdb_pointee_type)) {
+      CompilerType id_type = m_ast.GetBasicType(eBasicTypeObjCSel);
+      AddSourceInfoToDecl(type, decl);
+      return symbol_file->MakeType(
+          pointer_type->getSymIndexId(), ConstString("SEL"),
+          pointer_type->getLength(), nullptr, pdb_pointee_type,
+          lldb_private::Type::eEncodingIsUID, decl, id_type,
+          lldb_private::Type::ResolveState::Full);
+    }
+
+    Type *pointee_type = symbol_file->ResolveTypeUID(pdb_pointee_type);
     if (!pointee_type)
       return nullptr;
 
