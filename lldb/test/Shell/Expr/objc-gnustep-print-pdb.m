@@ -60,6 +60,7 @@ __attribute__((objc_root_class))
 // CHECK:   _char
 // CHECK:   _ptr_void
 // CHECK:   _ptr_nsobject
+// CHECK:   _id_objc
 // CHECK: }
 
 int main() {
