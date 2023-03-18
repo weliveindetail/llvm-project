@@ -67,6 +67,11 @@ enum EdgeKind_aarch32 : Edge::Kind {
   LastThumbRelocation = Thumb_MovtAbs,
 };
 
+/// Flags enum for AArch32-specific symbol properties
+enum TargetFlags_aarch32 : TargetFlagsType {
+  ThumbSymbol = 1 << 0,
+};
+
 /// Human-readable name for a given CPU architecture kind
 const char *getCPUArchName(ARMBuildAttrs::CPUArch K);
 

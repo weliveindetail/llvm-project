@@ -290,8 +290,10 @@ Error applyFixupData(LinkGraph &G, Block &B, const Edge &E) {
 
   Edge::Kind Kind = E.getKind();
   uint64_t FixupAddress = (B.getAddress() + E.getOffset()).getValue();
-  uint64_t TargetAddress = E.getTarget().getAddress().getValue();
   int64_t Addend = E.getAddend();
+  Symbol &TargetSymbol = E.getTarget();
+  uint64_t TargetAddress = TargetSymbol.getAddress().getValue();
+  assert(!TargetSymbol.hasTargetFlags(ThumbSymbol));
 
   // Regular data relocations have size 4, alignment 1 and write the full 32-bit
   // result to the place; no need for overflow checking. There are three
@@ -335,8 +337,11 @@ Error applyFixupThumb(LinkGraph &G, Block &B, const Edge &E,
 
   Edge::Kind Kind = E.getKind();
   uint64_t FixupAddress = (B.getAddress() + E.getOffset()).getValue();
-  uint64_t TargetAddress = E.getTarget().getAddress().getValue();
   int64_t Addend = E.getAddend();
+  Symbol &TargetSymbol = E.getTarget();
+  uint64_t TargetAddress = TargetSymbol.getAddress().getValue();
+  if (TargetSymbol.hasTargetFlags(ThumbSymbol))
+    TargetAddress |= 0x01;
 
   switch (Kind) {
   case Thumb_Jump24: {
@@ -346,7 +351,7 @@ Error applyFixupThumb(LinkGraph &G, Block &B, const Edge &E,
       return make_error<JITLinkError>("Relocation expects an unconditional "
                                       "B.W branch instruction: " +
                                       StringRef(G.getEdgeKindName(Kind)));
-    if ((TargetAddress & 0x01) == 0)
+    if (!(TargetSymbol.hasTargetFlags(ThumbSymbol)))
       return make_error<JITLinkError>("Branch relocation needs interworking "
                                       "veneer when bridging to ARM: " +
                                       StringRef(G.getEdgeKindName(Kind)));
@@ -373,7 +378,7 @@ Error applyFixupThumb(LinkGraph &G, Block &B, const Edge &E,
 
     // The call instruction itself is Thumb. The call destination can either be
     // Thumb or Arm. We use BL to stay in Thumb and BLX to change to Arm.
-    bool TargetIsArm = (Value & 0x01) == 0;
+    bool TargetIsArm = !TargetSymbol.hasTargetFlags(ThumbSymbol);
     bool InstrIsBlx = (R.Lo & FixupInfo<Thumb_Call>::LoBitNoBlx) == 0;
     if (TargetIsArm != InstrIsBlx) {
       if (LLVM_LIKELY(TargetIsArm)) {
@@ -449,7 +454,9 @@ Symbol &StubsManager<Thumbv7>::createEntry(LinkGraph &G, Symbol &Target) {
   });
   B.addEdge(Thumb_MovwAbsNC, 0, Target, 0);
   B.addEdge(Thumb_MovtAbs, 4, Target, 0);
-  return G.addAnonymousSymbol(B, 0x01, B.getSize(), true, false);
+  Symbol &Stub = G.addAnonymousSymbol(B, 0, B.getSize(), true, false);
+  Stub.setTargetFlags(ThumbSymbol);
+  return Stub;
 }
 
 const char *getCPUArchName(ARMBuildAttrs::CPUArch K) {

@@ -180,6 +180,20 @@ private:
 
   aarch32::ArmConfig ArmCfg;
 
+protected:
+  TargetFlagsType makeTargetFlags(const typename ELFT::Sym &Sym) override {
+    if (Sym.getValue() & 0x01)
+      return aarch32::ThumbSymbol;
+    return TargetFlagsType{};
+  }
+
+  orc::ExecutorAddrDiff getRawOffset(const typename ELFT::Sym &Sym,
+                                     TargetFlagsType Flags) override {
+    assert((makeTargetFlags(Sym) & Flags) == Flags);
+    static constexpr uint64_t ThumbBit = 0x01;
+    return Sym.getValue() & ~ThumbBit;
+  }
+
 public:
   ELFLinkGraphBuilder_aarch32(StringRef FileName, const ELFFile<ELFT> &Obj,
                               Triple TT, aarch32::ArmConfig ArmCfg)
