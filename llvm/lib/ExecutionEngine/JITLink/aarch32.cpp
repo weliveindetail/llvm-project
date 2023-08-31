@@ -154,7 +154,7 @@ struct ThumbRelocation {
 Error makeUnexpectedOpcodeError(const LinkGraph &G, const ThumbRelocation &R,
                                 Edge::Kind Kind) {
   return make_error<JITLinkError>(
-      formatv("Invalid opcode [ 0x{0:x4}, 0x{1:x4} ] for relocation: {2}",
+      formatv("Invalid opcode [ {0:x4}, {1:x4} ] for relocation: {2}",
               static_cast<uint16_t>(R.Hi), static_cast<uint16_t>(R.Lo),
               G.getEdgeKindName(Kind)));
 }
@@ -345,8 +345,6 @@ Error applyFixupThumb(LinkGraph &G, Block &B, const Edge &E,
   int64_t Addend = E.getAddend();
   Symbol &TargetSymbol = E.getTarget();
   uint64_t TargetAddress = TargetSymbol.getAddress().getValue();
-  if (TargetSymbol.hasTargetFlags(ThumbSymbol))
-    TargetAddress |= 0x01;
 
   switch (Kind) {
   case Thumb_Jump24: {

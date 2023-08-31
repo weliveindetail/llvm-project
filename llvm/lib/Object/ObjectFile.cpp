@@ -109,7 +109,8 @@ ObjectFile::getRelocatedSection(DataRefImpl Sec) const {
 Triple ObjectFile::makeTriple() const {
   Triple TheTriple;
   auto Arch = getArch();
-  TheTriple.setArch(Triple::ArchType(Arch));
+  //TheTriple.setArch(Triple::ArchType(Arch));
+  TheTriple.setArch(Triple::thumb);
 
   // For ARM targets, try to use the build attributes to build determine
   // the build target. Target features are also added, but later during
