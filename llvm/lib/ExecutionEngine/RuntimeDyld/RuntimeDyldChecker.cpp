@@ -283,6 +283,7 @@ private:
           "");
 
     unsigned OpIdx = OpIdxExpr.getValue();
+    dbgs() << "Evaluating Operand[" << OpIdx << "] from "; Inst.dump();
     if (OpIdx >= Inst.getNumOperands()) {
       std::string ErrMsg;
       raw_string_ostream ErrMsgStream(ErrMsg);

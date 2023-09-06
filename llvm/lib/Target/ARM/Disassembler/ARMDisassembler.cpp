@@ -1162,7 +1162,10 @@ DecodeStatus ARMDisassembler::getThumbInstruction(MCInst &MI, uint64_t &Size,
   if (Result != MCDisassembler::Fail) {
     Size = 4;
     bool InITBlock = ITBlock.instrInITBlock();
+    // call case
+    dbgs() << "Before AddThumbPredicate: "; MI.dump();
     Check(Result, AddThumbPredicate(MI));
+    dbgs() << " After AddThumbPredicate: "; MI.dump();
     AddThumb1SBit(MI, InITBlock);
     return Result;
   }
@@ -1171,7 +1174,10 @@ DecodeStatus ARMDisassembler::getThumbInstruction(MCInst &MI, uint64_t &Size,
       decodeInstruction(DecoderTableThumb232, MI, Insn32, Address, this, STI);
   if (Result != MCDisassembler::Fail) {
     Size = 4;
+    // jump24 case
+    dbgs() << "Before AddThumbPredicate: "; MI.dump();
     Check(Result, AddThumbPredicate(MI));
+    dbgs() << " After AddThumbPredicate: "; MI.dump();
     return checkDecodedInstruction(MI, Size, Address, CS, Insn32, Result);
   }
 

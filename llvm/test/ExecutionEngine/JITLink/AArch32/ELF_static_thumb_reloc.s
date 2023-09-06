@@ -24,7 +24,8 @@ main:
 # CHECK-INSTR: 	       a: f7ff fffe     bl      0xa <call_site>
 # CHECK-INSTR: 	0000000e <call_target>:
 # CHECK-INSTR: 	       e: 4770          bx      lr
-# jitlink-check: decode_operand(call_site, 0) = call_target - next_pc(call_site)
+# Invalidate the expected result, so we get the error output for both
+# jitlink-check: decode_operand(call_site, 0) = call_target - next_pc(call_site) + 42
 	.globl	call_site
 	.type	call_site,%function
 	.code	16
@@ -42,7 +43,8 @@ call_target:
 	.size	call_target,	.-call_target
 
 # CHECK-TYPE: {{[0-9a-f]+}} R_ARM_THM_JUMP24 jump24_target
-# jitlink-check: decode_operand(jump24_site, 0) = jump24_target - next_pc(jump24_site)
+# Invalidate the expected result, so we get the error output for both
+# jitlink-check: decode_operand(jump24_site, 0) = jump24_target - next_pc(jump24_site) + 42
 	.globl	jump24_site
 	.type	jump24_site,%function
 	.code	16
