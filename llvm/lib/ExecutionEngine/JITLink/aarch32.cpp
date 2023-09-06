@@ -159,7 +159,7 @@ struct ThumbRelocation {
 Error makeUnexpectedOpcodeError(const LinkGraph &G, const ThumbRelocation &R,
                                 Edge::Kind Kind) {
   return make_error<JITLinkError>(
-      formatv("Invalid opcode [ 0x{0:x4}, 0x{1:x4} ] for relocation: {2}",
+      formatv("Invalid opcode [ {0:x4}, {1:x4} ] for relocation: {2}",
               static_cast<uint16_t>(R.Hi), static_cast<uint16_t>(R.Lo),
               G.getEdgeKindName(Kind)));
 }
@@ -247,10 +247,6 @@ Expected<int64_t> readAddendThumb(LinkGraph &G, Block &B, const Edge &E,
   case Thumb_Jump24:
     if (!checkOpcode<Thumb_Jump24>(R))
       return makeUnexpectedOpcodeError(G, R, Kind);
-    if (R.Lo & FixupInfo<Thumb_Jump24>::LoBitConditional)
-      return make_error<JITLinkError>("Relocation expects an unconditional "
-                                      "B.W branch instruction: " +
-                                      StringRef(G.getEdgeKindName(Kind)));
     return LLVM_LIKELY(ArmCfg.J1J2BranchEncoding)
                   ? decodeImmBT4BlT1BlxT2_J1J2(R.Hi, R.Lo)
                   : decodeImmBT4BlT1BlxT2(R.Hi, R.Lo);
@@ -350,17 +346,11 @@ Error applyFixupThumb(LinkGraph &G, Block &B, const Edge &E,
   int64_t Addend = E.getAddend();
   Symbol &TargetSymbol = E.getTarget();
   uint64_t TargetAddress = TargetSymbol.getAddress().getValue();
-  if (TargetSymbol.hasTargetFlags(ThumbSymbol))
-    TargetAddress |= 0x01;
 
   switch (Kind) {
   case Thumb_Jump24: {
     if (!checkOpcode<Thumb_Jump24>(R))
       return makeUnexpectedOpcodeError(G, R, Kind);
-    if (R.Lo & FixupInfo<Thumb_Jump24>::LoBitConditional)
-      return make_error<JITLinkError>("Relocation expects an unconditional "
-                                      "B.W branch instruction: " +
-                                      StringRef(G.getEdgeKindName(Kind)));
     if (!hasTargetFlags(TargetSymbol, ThumbSymbol))
       return make_error<JITLinkError>("Branch relocation needs interworking "
                                       "stub when bridging to ARM: " +
