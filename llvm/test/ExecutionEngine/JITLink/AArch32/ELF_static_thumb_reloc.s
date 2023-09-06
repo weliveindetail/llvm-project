@@ -1,5 +1,4 @@
-# RUN: llvm-mc -triple=thumbv7-linux-gnueabi -arm-add-build-attributes \
-# RUN:	       -filetype=obj -o %t.o %s
+# RUN: llvm-mc -triple=thumbv7-linux-gnueabi -arm-add-build-attributes -filetype=obj -o %t.o %s
 # RUN: llvm-objdump -r %t.o | FileCheck --check-prefix=CHECK-TYPE %s
 # RUN: llvm-objdump --disassemble %t.o | FileCheck --check-prefix=CHECK-INSTR %s
 # RUN: llvm-jitlink -noexec -slab-address 0x76ff0000 -slab-allocate 10Kb \
