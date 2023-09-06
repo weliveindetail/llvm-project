@@ -293,6 +293,11 @@ Expected<int64_t> readAddendArm(LinkGraph &G, Block &B, const Edge &E) {
       return makeUnexpectedOpcodeError(G, R, Kind);
     return decodeImmBA1BlA1BlxA2(R.Wd);
 
+  case Arm_Jump24:
+    if (!checkOpcode<Arm_Jump24>(R))
+      return makeUnexpectedOpcodeError(G, R, Kind);
+    return decodeImmBA1BlA1BlxA2(R.Wd);
+
   default:
     return make_error<JITLinkError>(
         "In graph " + G.getName() + ", section " + B.getSection().getName() +
@@ -398,6 +403,22 @@ Error applyFixupArm(LinkGraph &G, Block &B, const Edge &E) {
   uint64_t TargetAddress = TargetSymbol.getAddress().getValue();
 
   switch (Kind) {
+  case Arm_Jump24: {
+    if (!checkOpcode<Arm_Jump24>(R))
+      return makeUnexpectedOpcodeError(G, R, Kind);
+    if (hasTargetFlags(TargetSymbol, ThumbSymbol))
+      return make_error<JITLinkError>("Branch relocation needs interworking "
+                                      "stub when bridging to Thumb: " +
+                                      StringRef(G.getEdgeKindName(Kind)));
+
+    int64_t Value = TargetAddress - FixupAddress + Addend;
+
+    if (!isInt<26>(Value))
+      return makeTargetOutOfRangeError(G, B, E);
+    writeImmediate<Arm_Jump24>(R, encodeImmBA1BlA1BlxA2(Value));
+
+    return Error::success();
+  }
   case Arm_Call: {
     if (!checkOpcode<Arm_Call>(R))
       return makeUnexpectedOpcodeError(G, R, Kind);
@@ -573,6 +594,7 @@ const char *getEdgeKindName(Edge::Kind K) {
   switch (K) {
     KIND_NAME_CASE(Data_Delta32)
     KIND_NAME_CASE(Arm_Call)
+    KIND_NAME_CASE(Arm_Jump24)
     KIND_NAME_CASE(Thumb_Call)
     KIND_NAME_CASE(Thumb_Jump24)
     KIND_NAME_CASE(Thumb_MovwAbsNC)
