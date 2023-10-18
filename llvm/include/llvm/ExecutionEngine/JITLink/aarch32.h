@@ -271,21 +271,37 @@ inline Error applyFixup(LinkGraph &G, Block &B, const Edge &E,
   llvm_unreachable("Relocation must be of class Data, Arm or Thumb");
 }
 
-/// Stubs builder for a specific StubsFlavor
+/// Global Offset Table builder
+class GOTTableManager : public TableManager<GOTTableManager> {
+public:
+  static StringRef getSectionName() { return "$__GOT"; }
+
+  bool visitEdge(LinkGraph &G, Block *B, Edge &E);
+  Symbol &createEntry(LinkGraph &G, Symbol &Target);
+
+private:
+  Section &getGOTSection(LinkGraph &G) {
+    if (!GOTSection)
+      GOTSection = &G.createSection(getSectionName(), orc::MemProt::Read);
+    return *GOTSection;
+  }
+
+  Section *GOTSection = nullptr;
+};
+
+/// PLT stubs builder for a specific StubsFlavor
 ///
 /// Right now we only have one default stub kind, but we want to extend this
 /// and allow creation of specific kinds in the future (e.g. branch range
 /// extension or interworking).
 ///
-/// Let's keep it simple for the moment and not wire this through a GOT.
-///
 template <StubsFlavor Flavor>
-class StubsManager : public TableManager<StubsManager<Flavor>> {
+class PLTTableManager : public TableManager<PLTTableManager<Flavor>> {
 public:
-  StubsManager() = default;
+  PLTTableManager(GOTTableManager &GOT) : GOT(GOT) {}
 
   /// Name of the object file section that will contain all our stubs.
-  static StringRef getSectionName() { return "__llvm_jitlink_STUBS"; }
+  static StringRef getSectionName() { return "$__STUBS"; }
 
   /// Implements link-graph traversal via visitExistingEdges().
   bool visitEdge(LinkGraph &G, Block *B, Edge &E) {
@@ -328,12 +344,13 @@ private:
     return *StubsSection;
   }
 
+  GOTTableManager &GOT;
   Section *StubsSection = nullptr;
 };
 
 /// Create a branch range extension stub with Thumb encoding for v7 CPUs.
 template <>
-Symbol &StubsManager<Thumbv7>::createEntry(LinkGraph &G, Symbol &Target);
+Symbol &PLTTableManager<Thumbv7>::createEntry(LinkGraph &G, Symbol &Target);
 
 } // namespace aarch32
 } // namespace jitlink

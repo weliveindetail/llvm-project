@@ -214,8 +214,9 @@ template <aarch32::StubsFlavor Flavor>
 Error buildTables_ELF_aarch32(LinkGraph &G) {
   LLVM_DEBUG(dbgs() << "Visiting edges in graph:\n");
 
-  aarch32::StubsManager<Flavor> PLT;
-  visitExistingEdges(G, PLT);
+  aarch32::GOTTableManager GOT;
+  aarch32::PLTTableManager<Flavor> PLT(GOT);
+  visitExistingEdges(G, GOT, PLT);
   return Error::success();
 }
 

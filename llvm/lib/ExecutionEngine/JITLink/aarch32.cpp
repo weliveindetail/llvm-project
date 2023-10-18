@@ -619,6 +619,31 @@ Error applyFixupThumb(LinkGraph &G, Block &B, const Edge &E,
   }
 }
 
+static Symbol &createAnonymousPointer(LinkGraph &G, Section &PointerSection,
+                                      Symbol *InitialTarget,
+                                      uint64_t InitialAddend = 0) {
+  // TODO: Do we have an alignment of 4 in ARM and if so how do we distinguish
+  // it at this place?
+  constexpr uint8_t AlignmentThumb = 2;
+  constexpr orc::ExecutorAddr MaxAddrThumb{~uint32_t(AlignmentThumb - 1)};
+  constexpr uint64_t PointerSize = 4;
+  constexpr char NullPointerContent[] { 0x00, 0x00, 0x00, 0x00 };
+  auto &B = G.createContentBlock(PointerSection, NullPointerContent,
+                                 MaxAddrThumb, AlignmentThumb, 0);
+  if (InitialTarget)
+    B.addEdge(Data_Pointer32, 0, *InitialTarget, InitialAddend);
+  return G.addAnonymousSymbol(B, 0, PointerSize, false, false);
+}
+
+bool GOTTableManager::visitEdge(LinkGraph &G, Block *B, Edge &E) {
+  return false;
+}
+
+Symbol &GOTTableManager::createEntry(LinkGraph &G, Symbol &Target) {
+  // Add new block in GOT section and return an anonymous symbol pointing to it.
+  return createAnonymousPointer(G, getGOTSection(G), &Target);
+}
+
 const uint8_t Thumbv7ABS[] = {
     0x40, 0xf2, 0x00, 0x0c, // movw r12, #0x0000    ; lower 16-bit
     0xc0, 0xf2, 0x00, 0x0c, // movt r12, #0x0000    ; upper 16-bit
@@ -626,7 +651,7 @@ const uint8_t Thumbv7ABS[] = {
 };
 
 template <>
-Symbol &StubsManager<Thumbv7>::createEntry(LinkGraph &G, Symbol &Target) {
+Symbol &PLTTableManager<Thumbv7>::createEntry(LinkGraph &G, Symbol &Target) {
   constexpr uint64_t Alignment = 4;
   Block &B = addStub(G, Thumbv7ABS, Alignment);
   LLVM_DEBUG({
@@ -636,8 +661,9 @@ Symbol &StubsManager<Thumbv7>::createEntry(LinkGraph &G, Symbol &Target) {
            checkRegister<Thumb_MovtAbs>(StubPtr + 4, Reg12) &&
            "Linker generated stubs may only corrupt register r12 (IP)");
   });
-  B.addEdge(Thumb_MovwAbsNC, 0, Target, 0);
-  B.addEdge(Thumb_MovtAbs, 4, Target, 0);
+  Symbol &GOTEntry = GOT.getEntryForTarget(G, Target);
+  B.addEdge(Thumb_MovwAbsNC, 0, GOTEntry, 0);
+  B.addEdge(Thumb_MovtAbs, 4, GOTEntry, 0);
   Symbol &Stub = G.addAnonymousSymbol(B, 0, B.getSize(), true, false);
   Stub.setTargetFlags(ThumbSymbol);
   return Stub;
