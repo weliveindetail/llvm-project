@@ -250,6 +250,15 @@ Error makeUnexpectedOpcodeError(const LinkGraph &G, const ArmRelocation &R,
               static_cast<uint32_t>(R.Wd), G.getEdgeKindName(Kind)));
 }
 
+class FixupInfoTable {
+  static constexpr size_t Items = LastRelocation + 1;
+
+private:
+  std::array<std::unique_ptr<FixupInfoBase>, Items> Data;
+};
+
+ManagedStatic<FixupInfoTable> DynFixupInfos;
+
 static auto &getFixupInfoTable() {
   static constexpr size_t Items = LastRelocation + 1;
   static std::array<std::unique_ptr<FixupInfoBase>, Items> FixupInfoTable;
