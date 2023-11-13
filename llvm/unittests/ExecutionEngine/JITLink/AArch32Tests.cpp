@@ -8,6 +8,7 @@
 
 #include <llvm/BinaryFormat/ELF.h>
 #include <llvm/ExecutionEngine/JITLink/aarch32.h>
+#include <llvm/Testing/Support/Error.h>
 
 #include "gtest/gtest.h"
 
@@ -65,6 +66,36 @@ TEST(AArch32_ELF, EdgeKinds) {
 
     EXPECT_EQ(*JITLinkKind, K) << "Round-trip value inconsistent?";
   }
+}
+
+TEST(AArch32_ELF, DynFixupInfos) {
+  // Check that access fails if the lookup table wasn't populated yet.
+  resetFixupInfos();
+  EXPECT_EQ(FixupInfoBase::getDynFixupInfo(FirstDataRelocation), nullptr);
+  EXPECT_EQ(FixupInfoBase::getDynFixupInfo(FirstArmRelocation), nullptr);
+  EXPECT_EQ(FixupInfoBase::getDynFixupInfo(FirstThumbRelocation), nullptr);
+  populateFixupInfos();
+
+  // Opcode check works for all Arm edges
+  for (Edge::Kind K = FirstArmRelocation; K < LastArmRelocation; K += 1) {
+    const FixupInfoBase *InfoBase = FixupInfoBase::getDynFixupInfo(K);
+    EXPECT_NE(InfoBase, nullptr);
+    const FixupInfoArm *InfoArm = static_cast<const FixupInfoArm *>(InfoBase);
+    EXPECT_NE(InfoArm->checkOpcode, nullptr);
+    EXPECT_FALSE(InfoArm->checkOpcode(0x00000000));
+  }
+  // Opcode check works for all Thumb edges too
+  for (Edge::Kind K = FirstThumbRelocation; K < LastThumbRelocation; K += 1) {
+    const FixupInfoBase *InfoBase = FixupInfoBase::getDynFixupInfo(K);
+    EXPECT_NE(InfoBase, nullptr);
+    const auto *InfoThumb = static_cast<const FixupInfoThumb *>(InfoBase);
+    EXPECT_NE(InfoThumb->checkOpcode, nullptr);
+    EXPECT_FALSE(InfoThumb->checkOpcode(0x0000, 0x0000));
+  }
+  // Still fails for Data and generic edges
+  EXPECT_EQ(FixupInfoBase::getDynFixupInfo(FirstDataRelocation), nullptr);
+  EXPECT_EQ(FixupInfoBase::getDynFixupInfo(Edge::GenericEdgeKind::Invalid),
+            nullptr);
 }
 
 namespace llvm {

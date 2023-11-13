@@ -19,6 +19,7 @@
 #include "llvm/Object/ELFObjectFile.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/TargetParser/ARMTargetParser.h"
+#include <mutex>
 
 #include "ELFLinkGraphBuilder.h"
 #include "JITLinkGeneric.h"
@@ -232,7 +233,10 @@ createLinkGraphFromELFObject_aarch32(MemoryBufferRef ObjectBuffer) {
            << ObjectBuffer.getBufferIdentifier() << "...\n";
   });
 
-  aarch32::populateFixupInfos();
+  std::once_flag Flag;
+  std::call_once(Flag, []() {
+    aarch32::populateFixupInfos();
+  });
 
   auto ELFObj = ObjectFile::createELFObjectFile(ObjectBuffer);
   if (!ELFObj)

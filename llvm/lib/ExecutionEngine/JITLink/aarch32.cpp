@@ -17,6 +17,7 @@
 #include "llvm/ExecutionEngine/JITLink/JITLink.h"
 #include "llvm/Object/ELFObjectFile.h"
 #include "llvm/Support/Endian.h"
+#include "llvm/Support/ManagedStatic.h"
 #include "llvm/Support/MathExtras.h"
 
 #define DEBUG_TYPE "jitlink"
@@ -304,42 +305,55 @@ void populateFixupInfos(TableT &Table) {
 } // namespace
 
 void populateFixupInfos() {
-  static std::once_flag Flag;
-  std::call_once(Flag, []() {
-    auto &Table = getFixupInfoTable();
-    populateFixupInfos<FirstArmRelocation, LastArmRelocation>(Table);
-    populateFixupInfos<FirstThumbRelocation, LastThumbRelocation>(Table);
-  });
+  auto &Table = getFixupInfoTable();
+  populateFixupInfos<FirstArmRelocation, LastArmRelocation>(Table);
+  populateFixupInfos<FirstThumbRelocation, LastThumbRelocation>(Table);
 }
 
-template <typename TargetModeSubclass>
-static const TargetModeSubclass *const getDynFixupInfo(Edge::Kind K) {
-  assert(K >= Edge::FirstRelocation && "Invalid value for edge kind");
-  assert(K <= LastRelocation && "Invalid value for edge kind");
-  assert(getFixupInfoTable().at(K) && "Please call populateFixupInfos() first");
-  return static_cast<TargetModeSubclass *>(getFixupInfoTable().at(K).get());
+void resetFixupInfos() {
+  for (std::unique_ptr<FixupInfoBase> &Entry : getFixupInfoTable())
+    Entry.reset();
 }
 
-static bool checkOpcode(const ArmRelocation &R, Edge::Kind Kind) {
+static const FixupInfoBase *getDynFixupInfoImpl(Edge::Kind K) {
+  const auto &Table = getFixupInfoTable();
+  assert(K < Table.size() && "Invalid value for edge kind");
+  const std::unique_ptr<FixupInfoBase> &Entry = Table.at(K);
+  if (LLVM_UNLIKELY(!Entry))
+    return nullptr;
+  return Entry.get();
+}
+
+static Error
+checkOpcode(LinkGraph &G, const ArmRelocation &R, Edge::Kind Kind) {
   assert(Kind >= FirstArmRelocation && Kind <= LastArmRelocation &&
          "Edge kind is no Arm relocation");
-  const FixupInfoArm *const Info = getDynFixupInfo<FixupInfoArm>(Kind);
-  if (LLVM_LIKELY(Info) && LLVM_LIKELY(Info->checkOpcode))
-    return Info->checkOpcode(R.Wd);
-  LLVM_DEBUG(dbgs() << "Can not perform Opcode check for aarch32 edge kind "
-                    << getEdgeKindName(Kind));
-  return true;
+  const FixupInfoBase *Entry = getDynFixupInfoImpl(Kind);
+  assert(Entry && "Please call populateFixupInfos() first");
+  const FixupInfoArm &Info = *static_cast<const FixupInfoArm *>(Entry);
+  assert(Info.checkOpcode && "Opcode check is mandatory for Arm edges");
+  if (!Info.checkOpcode(R.Wd))
+    return makeUnexpectedOpcodeError(G, R, Kind);
+
+  return Error::success();
 }
 
-static bool checkOpcode(const ThumbRelocation &R, Edge::Kind Kind) {
+static Error
+checkOpcode(LinkGraph &G, const ThumbRelocation &R, Edge::Kind Kind) {
   assert(Kind >= FirstThumbRelocation && Kind <= LastThumbRelocation &&
          "Edge kind is no Thumb relocation");
-  const FixupInfoThumb *const Info = getDynFixupInfo<FixupInfoThumb>(Kind);
-  if (LLVM_LIKELY(Info) && LLVM_LIKELY(Info->checkOpcode))
-    return Info->checkOpcode(R.Hi, R.Lo);
-  LLVM_DEBUG(dbgs() << "Can not perform Opcode check for aarch32 edge kind "
-                    << getEdgeKindName(Kind));
-  return true;
+  const FixupInfoBase *Entry = getDynFixupInfoImpl(Kind);
+  assert(Entry && "Please call populateFixupInfos() first");
+  const FixupInfoThumb &Info = *static_cast<const FixupInfoThumb *>(Entry);
+  assert(Info.checkOpcode && "Opcode check is mandatory for Thumb edges");
+  if (!Info.checkOpcode(R.Hi, R.Lo))
+    return makeUnexpectedOpcodeError(G, R, Kind);
+
+  return Error::success();
+}
+
+const FixupInfoBase *FixupInfoBase::getDynFixupInfo(Edge::Kind K) {
+  return getDynFixupInfoImpl(K);
 }
 
 template <EdgeKind_aarch32 Kind>
@@ -408,8 +422,8 @@ Expected<int64_t> readAddendData(LinkGraph &G, Block &B, Edge::OffsetT Offset,
 Expected<int64_t> readAddendArm(LinkGraph &G, Block &B, Edge::OffsetT Offset,
                                 Edge::Kind Kind) {
   ArmRelocation R(B.getContent().data() + Offset);
-  if (!checkOpcode(R, Kind))
-    return makeUnexpectedOpcodeError(G, R, Kind);
+  if (Error Err = checkOpcode(G, R, Kind))
+    return std::move(Err);
 
   switch (Kind) {
   case Arm_Call:
@@ -431,8 +445,8 @@ Expected<int64_t> readAddendArm(LinkGraph &G, Block &B, Edge::OffsetT Offset,
 Expected<int64_t> readAddendThumb(LinkGraph &G, Block &B, Edge::OffsetT Offset,
                                   Edge::Kind Kind, const ArmConfig &ArmCfg) {
   ThumbRelocation R(B.getContent().data() + Offset);
-  if (!checkOpcode(R, Kind))
-    return makeUnexpectedOpcodeError(G, R, Kind);
+  if (Error Err = checkOpcode(G, R, Kind))
+    return std::move(Err);
 
   switch (Kind) {
   case Thumb_Call:
@@ -509,8 +523,8 @@ Error applyFixupData(LinkGraph &G, Block &B, const Edge &E) {
 Error applyFixupArm(LinkGraph &G, Block &B, const Edge &E) {
   WritableArmRelocation R(B.getAlreadyMutableContent().data() + E.getOffset());
   Edge::Kind Kind = E.getKind();
-  if (!checkOpcode(R, Kind))
-    return makeUnexpectedOpcodeError(G, R, Kind);
+  if (Error Err = checkOpcode(G, R, Kind))
+    return Err;
 
   uint64_t FixupAddress = (B.getAddress() + E.getOffset()).getValue();
   int64_t Addend = E.getAddend();
@@ -585,8 +599,8 @@ Error applyFixupThumb(LinkGraph &G, Block &B, const Edge &E,
   WritableThumbRelocation R(B.getAlreadyMutableContent().data() +
                             E.getOffset());
   Edge::Kind Kind = E.getKind();
-  if (!checkOpcode(R, Kind))
-    return makeUnexpectedOpcodeError(G, R, Kind);
+  if (Error Err = checkOpcode(G, R, Kind))
+    return Err;
 
   uint64_t FixupAddress = (B.getAddress() + E.getOffset()).getValue();
   int64_t Addend = E.getAddend();

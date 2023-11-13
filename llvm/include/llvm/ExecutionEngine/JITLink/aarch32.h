@@ -167,8 +167,13 @@ struct HalfWords {
 /// Initialize the lookup table for dynamic FixupInfo checks, e.g. checkOpcode()
 void populateFixupInfos();
 
+/// Delete all lookup table entries for dynamic FixupInfo checks. This is for
+/// testing only and not optimized for performance.
+void resetFixupInfos();
+
 /// FixupInfo base class is required for dynamic lookups.
 struct FixupInfoBase {
+  static const FixupInfoBase *getDynFixupInfo(Edge::Kind K);
   virtual ~FixupInfoBase() {}
 };
 
