@@ -109,15 +109,15 @@ class ELFJITLinker_aarch32 : public JITLinker<ELFJITLinker_aarch32> {
 public:
   ELFJITLinker_aarch32(std::unique_ptr<JITLinkContext> Ctx,
                        std::unique_ptr<LinkGraph> G, PassConfiguration PassCfg,
-                       aarch32::ArmConfig ArmCfg)
+                       aarch32::ArmConfig Cfg)
       : JITLinker(std::move(Ctx), std::move(G), std::move(PassCfg)),
-        ArmCfg(std::move(ArmCfg)) {}
+        Cfg(std::move(Cfg)) {}
 
 private:
-  aarch32::ArmConfig ArmCfg;
+  aarch32::ArmConfig Cfg;
 
   Error applyFixup(LinkGraph &G, Block &B, const Edge &E) const {
-    return aarch32::applyFixup(G, B, E, ArmCfg);
+    return aarch32::applyFixup(G, B, E, Cfg);
   }
 };
 
@@ -175,7 +175,7 @@ private:
     Edge::OffsetT Offset = FixupAddress - BlockToFix.getAddress();
 
     Expected<int64_t> Addend =
-        aarch32::readAddend(*Base::G, BlockToFix, Offset, *Kind, ArmCfg);
+        aarch32::readAddend(*Base::G, BlockToFix, Offset, *Kind, Cfg);
     if (!Addend)
       return Addend.takeError();
 
@@ -190,7 +190,7 @@ private:
     return Error::success();
   }
 
-  aarch32::ArmConfig ArmCfg;
+  aarch32::ArmConfig Cfg;
 
 protected:
   TargetFlagsType makeTargetFlags(const typename ELFT::Sym &Sym) override {
@@ -210,10 +210,10 @@ public:
   ELFLinkGraphBuilder_aarch32(StringRef FileName,
                               const llvm::object::ELFFile<ELFT> &Obj, Triple TT,
                               SubtargetFeatures Features,
-                              aarch32::ArmConfig ArmCfg)
+                              aarch32::ArmConfig Cfg)
       : ELFLinkGraphBuilder<ELFT>(Obj, std::move(TT), std::move(Features),
                                   FileName, getELFAArch32EdgeKindName),
-        ArmCfg(std::move(ArmCfg)) {}
+        Cfg(std::move(Cfg)) {}
 };
 
 template <aarch32::StubsFlavor Flavor>
@@ -250,14 +250,14 @@ createLinkGraphFromELFObject_aarch32(MemoryBufferRef ObjectBuffer) {
   // Resolve our internal configuration for the target. If at some point the
   // CPUArch alone becomes too unprecise, we can find more details in the
   // Tag_CPU_arch_profile.
-  aarch32::ArmConfig ArmCfg;
+  aarch32::ArmConfig Cfg;
   using namespace ARMBuildAttrs;
   auto Arch = static_cast<CPUArch>(ARM::getArchAttr(AK));
   switch (Arch) {
   case v7:
   case v8_A:
-    ArmCfg = aarch32::getArmConfigForCPUArch(Arch);
-    assert(ArmCfg.Stubs != aarch32::Unsupported &&
+    Cfg = aarch32::getArmConfigForCPUArch(Arch);
+    assert(Cfg.Stubs != aarch32::Unsupported &&
            "Provide a config for each supported CPU");
     break;
   default:
@@ -272,16 +272,14 @@ createLinkGraphFromELFObject_aarch32(MemoryBufferRef ObjectBuffer) {
   case Triple::thumb: {
     auto &ELFFile = cast<ELFObjectFile<ELF32LE>>(**ELFObj).getELFFile();
     return ELFLinkGraphBuilder_aarch32<llvm::endianness::little>(
-               (*ELFObj)->getFileName(), ELFFile, TT, std::move(*Features),
-               ArmCfg)
+               (*ELFObj)->getFileName(), ELFFile, TT, std::move(*Features), Cfg)
         .buildGraph();
   }
   case Triple::armeb:
   case Triple::thumbeb: {
     auto &ELFFile = cast<ELFObjectFile<ELF32BE>>(**ELFObj).getELFFile();
     return ELFLinkGraphBuilder_aarch32<llvm::endianness::big>(
-               (*ELFObj)->getFileName(), ELFFile, TT, std::move(*Features),
-               ArmCfg)
+               (*ELFObj)->getFileName(), ELFFile, TT, std::move(*Features), Cfg)
         .buildGraph();
   }
   default:
@@ -298,7 +296,7 @@ void link_ELF_aarch32(std::unique_ptr<LinkGraph> G,
   using namespace ARMBuildAttrs;
   ARM::ArchKind AK = ARM::parseArch(TT.getArchName());
   auto CPU = static_cast<CPUArch>(ARM::getArchAttr(AK));
-  aarch32::ArmConfig ArmCfg = aarch32::getArmConfigForCPUArch(CPU);
+  aarch32::ArmConfig Cfg = aarch32::getArmConfigForCPUArch(CPU);
 
   PassConfiguration PassCfg;
   if (Ctx->shouldAddDefaultTargetPasses(TT)) {
@@ -308,7 +306,7 @@ void link_ELF_aarch32(std::unique_ptr<LinkGraph> G,
     else
       PassCfg.PrePrunePasses.push_back(markAllSymbolsLive);
 
-    switch (ArmCfg.Stubs) {
+    switch (Cfg.Stubs) {
     case aarch32::Thumbv7:
       PassCfg.PostPrunePasses.push_back(
           buildTables_ELF_aarch32<aarch32::Thumbv7>);
@@ -322,7 +320,7 @@ void link_ELF_aarch32(std::unique_ptr<LinkGraph> G,
     return Ctx->notifyFailed(std::move(Err));
 
   ELFJITLinker_aarch32::link(std::move(Ctx), std::move(G), std::move(PassCfg),
-                             std::move(ArmCfg));
+                             std::move(Cfg));
 }
 
 } // namespace jitlink

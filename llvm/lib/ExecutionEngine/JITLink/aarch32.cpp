@@ -428,7 +428,7 @@ Expected<int64_t> readAddendArm(LinkGraph &G, Block &B, Edge::OffsetT Offset,
 }
 
 Expected<int64_t> readAddendThumb(LinkGraph &G, Block &B, Edge::OffsetT Offset,
-                                  Edge::Kind Kind, const ArmConfig &ArmCfg) {
+                                  Edge::Kind Kind, const ArmConfig &Cfg) {
   ThumbRelocation R(B.getContent().data() + Offset);
   if (Error Err = checkOpcode(G, R, Kind))
     return std::move(Err);
@@ -436,7 +436,7 @@ Expected<int64_t> readAddendThumb(LinkGraph &G, Block &B, Edge::OffsetT Offset,
   switch (Kind) {
   case Thumb_Call:
   case Thumb_Jump24:
-    return LLVM_LIKELY(ArmCfg.J1J2BranchEncoding)
+    return LLVM_LIKELY(Cfg.J1J2BranchEncoding)
                ? decodeImmBT4BlT1BlxT2_J1J2(R.Hi, R.Lo)
                : decodeImmBT4BlT1BlxT2(R.Hi, R.Lo);
 
@@ -456,6 +456,20 @@ Expected<int64_t> readAddendThumb(LinkGraph &G, Block &B, Edge::OffsetT Offset,
         " can not read implicit addend for aarch32 edge kind " +
         G.getEdgeKindName(Kind));
   }
+}
+
+Expected<int64_t> readAddend(LinkGraph &G, Block &B, Edge::OffsetT Offset,
+                             Edge::Kind Kind, const ArmConfig &Cfg) {
+  if (Kind <= LastDataRelocation)
+    return readAddendData(G, B, Offset, Kind);
+
+  if (Kind <= LastArmRelocation)
+    return readAddendArm(G, B, Offset, Kind);
+
+  if (Kind <= LastThumbRelocation)
+    return readAddendThumb(G, B, Offset, Kind, Cfg);
+
+  llvm_unreachable("Relocation must be of class Data, Arm or Thumb");
 }
 
 Error applyFixupData(LinkGraph &G, Block &B, const Edge &E) {
@@ -580,7 +594,7 @@ Error applyFixupArm(LinkGraph &G, Block &B, const Edge &E) {
 }
 
 Error applyFixupThumb(LinkGraph &G, Block &B, const Edge &E,
-                      const ArmConfig &ArmCfg) {
+                      const ArmConfig &Cfg) {
   WritableThumbRelocation R(B.getAlreadyMutableContent().data() +
                             E.getOffset());
   Edge::Kind Kind = E.getKind();
@@ -600,7 +614,7 @@ Error applyFixupThumb(LinkGraph &G, Block &B, const Edge &E,
                                       StringRef(G.getEdgeKindName(Kind)));
 
     int64_t Value = TargetAddress - FixupAddress + Addend;
-    if (LLVM_LIKELY(ArmCfg.J1J2BranchEncoding)) {
+    if (LLVM_LIKELY(Cfg.J1J2BranchEncoding)) {
       if (!isInt<25>(Value))
         return makeTargetOutOfRangeError(G, B, E);
       writeImmediate<Thumb_Jump24>(R, encodeImmBT4BlT1BlxT2_J1J2(Value));
@@ -633,7 +647,7 @@ Error applyFixupThumb(LinkGraph &G, Block &B, const Edge &E,
       }
     }
 
-    if (LLVM_LIKELY(ArmCfg.J1J2BranchEncoding)) {
+    if (LLVM_LIKELY(Cfg.J1J2BranchEncoding)) {
       if (!isInt<25>(Value))
         return makeTargetOutOfRangeError(G, B, E);
       writeImmediate<Thumb_Call>(R, encodeImmBT4BlT1BlxT2_J1J2(Value));
@@ -676,6 +690,21 @@ Error applyFixupThumb(LinkGraph &G, Block &B, const Edge &E,
         " encountered unfixable aarch32 edge kind " +
         G.getEdgeKindName(E.getKind()));
   }
+}
+
+Error applyFixup(LinkGraph &G, Block &B, const Edge &E, const ArmConfig &Cfg) {
+  Edge::Kind Kind = E.getKind();
+
+  if (Kind <= LastDataRelocation)
+    return applyFixupData(G, B, E);
+
+  if (Kind <= LastArmRelocation)
+    return applyFixupArm(G, B, E);
+
+  if (Kind <= LastThumbRelocation)
+    return applyFixupThumb(G, B, E, Cfg);
+
+  llvm_unreachable("Relocation must be of class Data, Arm or Thumb");
 }
 
 const uint8_t Thumbv7ABS[] = {

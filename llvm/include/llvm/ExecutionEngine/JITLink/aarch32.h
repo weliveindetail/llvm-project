@@ -136,12 +136,12 @@ struct ArmConfig {
 
 /// Obtain the sub-arch configuration for a given Arm CPU model.
 inline ArmConfig getArmConfigForCPUArch(ARMBuildAttrs::CPUArch CPUArch) {
-  ArmConfig ArmCfg;
+  ArmConfig Cfg;
   switch (CPUArch) {
   case ARMBuildAttrs::v7:
   case ARMBuildAttrs::v8_A:
-    ArmCfg.J1J2BranchEncoding = true;
-    ArmCfg.Stubs = Thumbv7;
+    Cfg.J1J2BranchEncoding = true;
+    Cfg.Stubs = Thumbv7;
     break;
   default:
     DEBUG_WITH_TYPE("jitlink", {
@@ -150,7 +150,7 @@ inline ArmConfig getArmConfigForCPUArch(ARMBuildAttrs::CPUArch CPUArch) {
     });
     break;
   }
-  return ArmCfg;
+  return Cfg;
 }
 
 /// Immutable pair of halfwords, Hi and Lo, with overflow check
@@ -268,61 +268,13 @@ template <> struct FixupInfo<Thumb_MovwPrelNC> : public FixupInfoThumbMov {
   static constexpr HalfWords Opcode{0xf240, 0x0000};
 };
 
-/// Helper function to read the initial addend for Data-class relocations.
-Expected<int64_t> readAddendData(LinkGraph &G, Block &B, Edge::OffsetT Offset,
-                                 Edge::Kind Kind);
+/// Main entry point: Read the immediate value for edge E in block B.
+/// It's the initial addend that the compiler encoded for REL-type relocations.
+Expected<int64_t> readAddend(LinkGraph &G, Block &B, Edge::OffsetT Offset,
+                             Edge::Kind Kind, const ArmConfig &Cfg);
 
-/// Helper function to read the initial addend for Arm-class relocations.
-Expected<int64_t> readAddendArm(LinkGraph &G, Block &B, Edge::OffsetT Offset,
-                                Edge::Kind Kind);
-
-/// Helper function to read the initial addend for Thumb-class relocations.
-Expected<int64_t> readAddendThumb(LinkGraph &G, Block &B, Edge::OffsetT Offset,
-                                  Edge::Kind Kind, const ArmConfig &ArmCfg);
-
-/// Read the initial addend for a REL-type relocation. It's the value encoded
-/// in the immediate field of the fixup location by the compiler.
-inline Expected<int64_t> readAddend(LinkGraph &G, Block &B,
-                                    Edge::OffsetT Offset, Edge::Kind Kind,
-                                    const ArmConfig &ArmCfg) {
-  if (Kind <= LastDataRelocation)
-    return readAddendData(G, B, Offset, Kind);
-
-  if (Kind <= LastArmRelocation)
-    return readAddendArm(G, B, Offset, Kind);
-
-  if (Kind <= LastThumbRelocation)
-    return readAddendThumb(G, B, Offset, Kind, ArmCfg);
-
-  llvm_unreachable("Relocation must be of class Data, Arm or Thumb");
-}
-
-/// Helper function to apply the fixup for Data-class relocations.
-Error applyFixupData(LinkGraph &G, Block &B, const Edge &E);
-
-/// Helper function to apply the fixup for Arm-class relocations.
-Error applyFixupArm(LinkGraph &G, Block &B, const Edge &E);
-
-/// Helper function to apply the fixup for Thumb-class relocations.
-Error applyFixupThumb(LinkGraph &G, Block &B, const Edge &E,
-                      const ArmConfig &ArmCfg);
-
-/// Apply fixup expression for edge to block content.
-inline Error applyFixup(LinkGraph &G, Block &B, const Edge &E,
-                        const ArmConfig &ArmCfg) {
-  Edge::Kind Kind = E.getKind();
-
-  if (Kind <= LastDataRelocation)
-    return applyFixupData(G, B, E);
-
-  if (Kind <= LastArmRelocation)
-    return applyFixupArm(G, B, E);
-
-  if (Kind <= LastThumbRelocation)
-    return applyFixupThumb(G, B, E, ArmCfg);
-
-  llvm_unreachable("Relocation must be of class Data, Arm or Thumb");
-}
+/// Main entry point: Apply fixup expression for edge E in block B.
+Error applyFixup(LinkGraph &G, Block &B, const Edge &E, const ArmConfig &Cfg);
 
 /// Stubs builder for a specific StubsFlavor
 ///
