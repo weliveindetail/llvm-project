@@ -734,6 +734,9 @@ Error LLJITBuilderState::prepareForConstruction() {
     case Triple::aarch64:
       UseJITLink = !TT.isOSBinFormatCOFF();
       break;
+    case Triple::arm:
+      UseJITLink = !TT.isOSBinFormatCOFF();
+      break;
     case Triple::x86_64:
       UseJITLink = !TT.isOSBinFormatCOFF();
       break;
