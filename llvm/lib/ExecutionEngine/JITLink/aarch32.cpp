@@ -678,27 +678,62 @@ Error applyFixupThumb(LinkGraph &G, Block &B, const Edge &E,
   }
 }
 
+const uint8_t Armv7ABS[] = {
+    0x00, 0xc0, 0x00, 0xe3, // movw r12, #0x0000     ; lower 16-bit
+    0x00, 0xc0, 0x40, 0xe3, // movt r12, #0x0000     ; upper 16-bit
+    0x1c, 0xff, 0x2f, 0xe1  // bx   r12
+};
+
 const uint8_t Thumbv7ABS[] = {
     0x40, 0xf2, 0x00, 0x0c, // movw r12, #0x0000    ; lower 16-bit
     0xc0, 0xf2, 0x00, 0x0c, // movt r12, #0x0000    ; upper 16-bit
     0x60, 0x47              // bx   r12
 };
 
-template <>
-Symbol &StubsManager<Thumbv7>::createEntry(LinkGraph &G, Symbol &Target) {
+/// Create a new node in the link-graph for the given stub template.
+template <size_t Size>
+static Block &addStub(LinkGraph &G, Section &S, const uint8_t (&Code)[Size]) {
   constexpr uint64_t Alignment = 4;
-  Block &B = addStub(G, Thumbv7ABS, Alignment);
-  LLVM_DEBUG({
-    const char *StubPtr = B.getContent().data();
-    HalfWords Reg12 = encodeRegMovtT1MovwT3(12);
-    assert(checkRegister<Thumb_MovwAbsNC>(StubPtr, Reg12) &&
-           checkRegister<Thumb_MovtAbs>(StubPtr + 4, Reg12) &&
-           "Linker generated stubs may only corrupt register r12 (IP)");
-  });
+  ArrayRef<char> Template(reinterpret_cast<const char *>(Code), Size);
+  return G.createContentBlock(S, Template, orc::ExecutorAddr(), Alignment, 0);
+}
+
+static Block &createStubThumbv7(LinkGraph &G, Section &S, Symbol &Target) {
+  Block &B = addStub(G, S, Thumbv7ABS);
   B.addEdge(Thumb_MovwAbsNC, 0, Target, 0);
   B.addEdge(Thumb_MovtAbs, 4, Target, 0);
+
+  [[maybe_unused]] const char *StubPtr = B.getContent().data();
+  [[maybe_unused]] HalfWords Reg12 = encodeRegMovtT1MovwT3(12);
+  assert(checkRegister<Thumb_MovwAbsNC>(StubPtr, Reg12) &&
+         checkRegister<Thumb_MovtAbs>(StubPtr + 4, Reg12) &&
+         "Linker generated stubs may only corrupt register r12 (IP)");
+  return B;
+}
+
+static Block &createStubArmv7(LinkGraph &G, Section &S, Symbol &Target) {
+  Block &B = addStub(G, S, Armv7ABS);
+  B.addEdge(Arm_MovwAbsNC, 0, Target, 0);
+  B.addEdge(Arm_MovtAbs, 4, Target, 0);
+
+  [[maybe_unused]] const char *StubPtr = B.getContent().data();
+  [[maybe_unused]] uint32_t Reg12 = encodeRegMovtA1MovwA2(12);
+  assert(checkRegister<Arm_MovwAbsNC>(StubPtr, Reg12) &&
+         checkRegister<Arm_MovtAbs>(StubPtr + 4, Reg12) &&
+         "Linker generated stubs may only corrupt register r12 (IP)");
+  return B;
+}
+
+template <>
+Symbol &StubsManager<StubsFlavor::v7>::createEntry(LinkGraph &G, Symbol &Target) {
+  Section &S = getStubsSection(G);
+  bool UseThumb = Target.getTargetFlags() & ThumbSymbol;
+  Block &B = UseThumb ? createStubThumbv7(G, S, Target)
+                      : createStubArmv7(G, S, Target);
+
   Symbol &Stub = G.addAnonymousSymbol(B, 0, B.getSize(), true, false);
-  Stub.setTargetFlags(ThumbSymbol);
+  if (UseThumb)
+    Stub.setTargetFlags(ThumbSymbol);
   return Stub;
 }
 

@@ -123,15 +123,15 @@ const char *getEdgeKindName(Edge::Kind K);
 ///
 /// Stubs are often called "veneers" in the official docs and online.
 ///
-enum StubsFlavor {
+enum class StubsFlavor {
   Unsupported = 0,
-  Thumbv7,
+  v7,
 };
 
 /// JITLink sub-arch configuration for Arm CPU models
 struct ArmConfig {
   bool J1J2BranchEncoding = false;
-  StubsFlavor Stubs = Unsupported;
+  StubsFlavor Stubs = StubsFlavor::Unsupported;
 };
 
 /// Obtain the sub-arch configuration for a given Arm CPU model.
@@ -141,7 +141,7 @@ inline ArmConfig getArmConfigForCPUArch(ARMBuildAttrs::CPUArch CPUArch) {
   case ARMBuildAttrs::v7:
   case ARMBuildAttrs::v8_A:
     ArmCfg.J1J2BranchEncoding = true;
-    ArmCfg.Stubs = Thumbv7;
+    ArmCfg.Stubs = StubsFlavor::v7;
     break;
   default:
     DEBUG_WITH_TYPE("jitlink", {
@@ -340,6 +340,8 @@ public:
       return false;
 
     switch (E.getKind()) {
+    case Arm_Call:
+    case Arm_Jump24:
     case Thumb_Call:
     case Thumb_Jump24: {
       DEBUG_WITH_TYPE("jitlink", {
@@ -358,15 +360,6 @@ public:
   Symbol &createEntry(LinkGraph &G, Symbol &Target);
 
 private:
-  /// Create a new node in the link-graph for the given stub template.
-  template <size_t Size>
-  Block &addStub(LinkGraph &G, const uint8_t (&Code)[Size],
-                 uint64_t Alignment) {
-    ArrayRef<char> Template(reinterpret_cast<const char *>(Code), Size);
-    return G.createContentBlock(getStubsSection(G), Template,
-                                orc::ExecutorAddr(), Alignment, 0);
-  }
-
   /// Get or create the object file section that will contain all our stubs.
   Section &getStubsSection(LinkGraph &G) {
     if (!StubsSection)
@@ -380,10 +373,10 @@ private:
 
 /// Create a branch range extension stub with Thumb encoding for v7 CPUs.
 template <>
-Symbol &StubsManager<Thumbv7>::createEntry(LinkGraph &G, Symbol &Target);
+Symbol &StubsManager<StubsFlavor::v7>::createEntry(LinkGraph &G, Symbol &Target);
 
-template <> inline StringRef StubsManager<Thumbv7>::getSectionName() {
-  return "__llvm_jitlink_aarch32_STUBS_Thumbv7";
+template <> inline StringRef StubsManager<StubsFlavor::v7>::getSectionName() {
+  return "__llvm_jitlink_aarch32_STUBS_v7";
 }
 
 } // namespace aarch32
