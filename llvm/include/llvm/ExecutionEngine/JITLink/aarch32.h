@@ -16,6 +16,7 @@
 #include "TableManager.h"
 #include "llvm/ExecutionEngine/JITLink/JITLink.h"
 #include "llvm/ExecutionEngine/Orc/Shared/ExecutorAddress.h"
+#include "llvm/ExecutionEngine/Orc/Shared/MemoryFlags.h"
 #include "llvm/Support/ARMBuildAttributes.h"
 #include "llvm/Support/Error.h"
 
@@ -335,45 +336,24 @@ public:
   static StringRef getSectionName();
 
   /// Implements link-graph traversal via visitExistingEdges().
-  bool visitEdge(LinkGraph &G, Block *B, Edge &E) {
-    if (E.getTarget().isDefined())
-      return false;
-
-    switch (E.getKind()) {
-    case Arm_Call:
-    case Arm_Jump24:
-    case Thumb_Call:
-    case Thumb_Jump24: {
-      DEBUG_WITH_TYPE("jitlink", {
-        dbgs() << "  Fixing " << G.getEdgeKindName(E.getKind()) << " edge at "
-               << B->getFixupAddress(E) << " (" << B->getAddress() << " + "
-               << formatv("{0:x}", E.getOffset()) << ")\n";
-      });
-      E.setTarget(this->getEntryForTarget(G, E.getTarget()));
-      return true;
-    }
-    }
-    return false;
-  }
-
-  /// Create a branch range extension stub for the class's flavor.
-  Symbol &createEntry(LinkGraph &G, Symbol &Target);
+  bool visitEdge(LinkGraph &G, Block *B, Edge &E);
 
 private:
-  /// Get or create the object file section that will contain all our stubs.
-  Section &getStubsSection(LinkGraph &G) {
-    if (!StubsSection)
-      StubsSection = &G.createSection(getSectionName(),
-                                      orc::MemProt::Read | orc::MemProt::Exec);
-    return *StubsSection;
-  }
+  struct SymbolAndFlags {
+    bool IsThumb;
+    orc::MemProt Prot;
+    Symbol *Sym;
+  };
 
-  Section *StubsSection = nullptr;
+  DenseMap<StringRef, SmallVector<SymbolAndFlags>> Entries;
+  DenseMap<orc::MemProt, Section *> Sections;
 };
 
 /// Create a branch range extension stub with Thumb encoding for v7 CPUs.
+//template <>
+//Symbol &StubsManager<StubsFlavor::v7>::createEntry(LinkGraph &G, Symbol &Target, bool UseThumb);
 template <>
-Symbol &StubsManager<StubsFlavor::v7>::createEntry(LinkGraph &G, Symbol &Target);
+bool StubsManager<StubsFlavor::v7>::visitEdge(LinkGraph &G, Block *B, Edge &E);
 
 template <> inline StringRef StubsManager<StubsFlavor::v7>::getSectionName() {
   return "__llvm_jitlink_aarch32_STUBS_v7";

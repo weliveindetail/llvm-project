@@ -129,9 +129,9 @@ Error registerMachOGraphInfo(Session &S, LinkGraph &G) {
                                          inconvertibleErrorCode());
 
         if (auto TS = getMachOStubTarget(G, Sym->getBlock()))
-          FileInfo.StubInfos[TS->getName()] = {Sym->getSymbolContent(),
+          FileInfo.StubInfos[TS->getName()].insert(0, {Sym->getSymbolContent(),
                                                Sym->getAddress().getValue(),
-                                               Sym->getTargetFlags()};
+                                               Sym->getTargetFlags()});
         else
           return TS.takeError();
         SectionContainsContent = true;

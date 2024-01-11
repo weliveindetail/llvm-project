@@ -29,14 +29,15 @@ public:
   /// Return the constructed entry
   ///
   /// Use parameter G to construct the entry for target symbol
-  Symbol &getEntryForTarget(LinkGraph &G, Symbol &Target) {
+  template <typename... ArgTs>
+  Symbol &getEntryForTarget(LinkGraph &G, Symbol &Target, ArgTs &&... Args) {
     assert(Target.hasName() && "Edge cannot point to anonymous target");
 
     auto EntryI = Entries.find(Target.getName());
 
     // Build the entry if it doesn't exist.
     if (EntryI == Entries.end()) {
-      auto &Entry = impl().createEntry(G, Target);
+      auto &Entry = impl().createEntry(G, Target, std::forward<ArgTs>(Args)...);
       DEBUG_WITH_TYPE("jitlink", {
         dbgs() << "    Created " << impl().getSectionName() << " entry for "
                << Target.getName() << ": " << Entry << "\n";

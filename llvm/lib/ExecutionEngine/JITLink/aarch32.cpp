@@ -15,6 +15,7 @@
 #include "llvm/ADT/StringExtras.h"
 #include "llvm/BinaryFormat/ELF.h"
 #include "llvm/ExecutionEngine/JITLink/JITLink.h"
+#include "llvm/ExecutionEngine/Orc/Shared/MemoryFlags.h"
 #include "llvm/Object/ELFObjectFile.h"
 #include "llvm/Support/Endian.h"
 #include "llvm/Support/ManagedStatic.h"
@@ -724,17 +725,106 @@ static Block &createStubArmv7(LinkGraph &G, Section &S, Symbol &Target) {
   return B;
 }
 
-template <>
-Symbol &StubsManager<StubsFlavor::v7>::createEntry(LinkGraph &G, Symbol &Target) {
-  Section &S = getStubsSection(G);
-  bool UseThumb = Target.getTargetFlags() & ThumbSymbol;
-  Block &B = UseThumb ? createStubThumbv7(G, S, Target)
-                      : createStubArmv7(G, S, Target);
+static SmallString<4> getRWXString(orc::MemProt Prot) {
+  SmallString<4> RWX;
+  RWX.push_back(((Prot & orc::MemProt::Read) != orc::MemProt::None) ? 'r' : '_');
+  RWX.push_back(((Prot & orc::MemProt::Write) != orc::MemProt::None) ? 'w' : '_');
+  RWX.push_back(((Prot & orc::MemProt::Exec) != orc::MemProt::None) ? 'x' : '_');
+  RWX.push_back('\0');
+  return RWX;
+}
 
-  Symbol &Stub = G.addAnonymousSymbol(B, 0, B.getSize(), true, false);
-  if (UseThumb)
-    Stub.setTargetFlags(ThumbSymbol);
-  return Stub;
+template <>
+bool StubsManager<StubsFlavor::v7>::visitEdge(LinkGraph &G, Block *B, Edge &E) {
+  if (E.getTarget().isDefined())
+    return false;
+
+  enum ThumbStatePreference { Undefined = -1, Avoid = 0, Prefer, Force };
+  ThumbStatePreference ThumbState = Undefined;
+
+  using MemProt = orc::MemProt;
+  MemProt Prot = MemProt::Read | MemProt::Exec;
+
+  switch (E.getKind()) {
+  case Arm_Call:
+  case Arm_Jump24:
+    ThumbState = Avoid;
+    break;
+  case Thumb_Call:
+    ThumbState = Prefer;
+    break;
+  case Thumb_Jump24:
+    ThumbState = Force;
+    break;
+  default:
+    return false;
+  }
+
+  auto Dump = [&](StringRef Action) {
+    dbgs() << "  " << Action << " " << G.getEdgeKindName(E.getKind()) << " edge at "
+            << B->getFixupAddress(E) << " (" << B->getAddress() << " + "
+            << formatv("{0:x}", E.getOffset()) << ")\n";
+  };
+
+  LLVM_DEBUG(Dump("Preparing interworking stub for"));
+
+  auto &Target = E.getTarget();
+  assert(Target.hasName() && "Edge cannot point to anonymous target");
+  auto TargetEntry = Entries.try_emplace(Target.getName()).first;
+
+  assert(ThumbState != Undefined && "Cannot select stub without defining Thumb state preference");
+
+  SymbolAndFlags *StubEntry = nullptr;
+  for (SymbolAndFlags &SF : TargetEntry->second) {
+    if (SF.Prot != Prot)
+      continue; // No match
+    if (SF.IsThumb) {
+      if (ThumbState == Avoid)
+        continue; // No match
+      StubEntry = &SF;
+      break; // Best match
+    }
+    if (ThumbState == Avoid) {
+      StubEntry = &SF;
+      break; // Best match
+    }
+    if (ThumbState == Prefer) {
+      StubEntry = &SF;
+      continue; // Acceptable match
+    }
+  }
+
+  if (!StubEntry) {
+    auto [SectionIt, NewSection] = Sections.try_emplace(Prot);
+    if (NewSection) {
+      std::string Name = (getSectionName() + "_" + getRWXString(Prot)).str();
+      SectionIt->second = &G.createSection(Name, Prot);
+    }
+
+    bool IsThumb = ThumbState >= Prefer;
+    Block &B = IsThumb
+             ? createStubThumbv7(G, *SectionIt->second, Target)
+             : createStubArmv7(G, *SectionIt->second, Target);
+
+    Symbol &Stub = G.addAnonymousSymbol(B, 0, B.getSize(), true, false);
+    if (IsThumb)
+      Stub.setTargetFlags(ThumbSymbol);
+
+    LLVM_DEBUG({
+      dbgs() << "    Created " << SectionIt->getSecond()->getName() << " entry for "
+              << Target.getName() << ": " << Stub << "\n";
+    });
+
+    StubEntry = &TargetEntry->second.emplace_back(IsThumb, Prot, &Stub);
+  }
+
+  LLVM_DEBUG({
+    dbgs() << "    Using " << StubEntry->Sym->getBlock().getSection().getName() << " entry "
+            << *StubEntry->Sym << "\n";
+  });
+
+  E.setTarget(*StubEntry->Sym);
+  return true;
 }
 
 const char *getEdgeKindName(Edge::Kind K) {
