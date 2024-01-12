@@ -327,8 +327,7 @@ inline Error applyFixup(LinkGraph &G, Block &B, const Edge &E,
 ///
 /// Let's keep it simple for the moment and not wire this through a GOT.
 ///
-template <StubsFlavor Flavor>
-class StubsManager : public TableManager<StubsManager<Flavor>> {
+template <StubsFlavor Flavor> class StubsManager {
 public:
   StubsManager() = default;
 
@@ -339,12 +338,7 @@ public:
   bool visitEdge(LinkGraph &G, Block *B, Edge &E);
 
 private:
-  struct SymbolAndFlags {
-    bool IsThumb;
-    orc::MemProt Prot;
-    Symbol *Sym;
-  };
-
+  using SymbolAndFlags = std::tuple<bool, orc::MemProt, Symbol *>;
   DenseMap<StringRef, SmallVector<SymbolAndFlags>> Entries;
   DenseMap<orc::MemProt, Section *> Sections;
 };
