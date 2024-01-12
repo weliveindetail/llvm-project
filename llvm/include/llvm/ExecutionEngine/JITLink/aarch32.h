@@ -337,10 +337,11 @@ public:
   /// Implements link-graph traversal via visitExistingEdges().
   bool visitEdge(LinkGraph &G, Block *B, Edge &E);
 
+  using SymbolAndFlags = std::tuple<bool, Symbol *>;
+
 private:
-  using SymbolAndFlags = std::tuple<bool, orc::MemProt, Symbol *>;
   DenseMap<StringRef, SmallVector<SymbolAndFlags>> Entries;
-  DenseMap<orc::MemProt, Section *> Sections;
+  Section *StubsSection;
 };
 
 /// Create a branch range extension stub with Thumb encoding for v7 CPUs.

@@ -734,17 +734,33 @@ static SmallString<4> getRWXString(orc::MemProt Prot) {
   return RWX;
 }
 
+enum ThumbStatePreference { Undefined = -1, Avoid = 0, Prefer, Force };
+
+static Symbol *selectStub(SmallVector<StubsManager<StubsFlavor::v7>::SymbolAndFlags> Stubs,
+                          ThumbStatePreference ThumbState) {
+  Symbol *StubSymbol = nullptr;
+  for (auto [StubIsThumb, Sym] : Stubs) {
+    if (StubIsThumb) {
+      if (ThumbState == Avoid)
+        continue; // No match
+      StubSymbol = Sym;
+      break; // Best match
+    }
+    if (ThumbState == Avoid) {
+      StubSymbol = Sym;
+      break; // Best match
+    }
+    if (ThumbState == Prefer) {
+      StubSymbol = Sym;
+      continue; // Acceptable match
+    }
+  }
+  return StubSymbol;
+}
+
 template <>
 bool StubsManager<StubsFlavor::v7>::visitEdge(LinkGraph &G, Block *B, Edge &E) {
-  if (E.getTarget().isDefined())
-    return false;
-
-  enum ThumbStatePreference { Undefined = -1, Avoid = 0, Prefer, Force };
   ThumbStatePreference ThumbState = Undefined;
-
-  using MemProt = orc::MemProt;
-  MemProt StubProt = MemProt::Read | MemProt::Exec;
-
   switch (E.getKind()) {
   case Arm_Call:
   case Arm_Jump24:
@@ -760,25 +776,31 @@ bool StubsManager<StubsFlavor::v7>::visitEdge(LinkGraph &G, Block *B, Edge &E) {
     return false;
   }
 
-  auto Dump = [&](StringRef Action) {
-    dbgs() << "  " << Action << " " << G.getEdgeKindName(E.getKind()) << " edge at "
-            << B->getFixupAddress(E) << " (" << B->getAddress() << " + "
-            << formatv("{0:x}", E.getOffset()) << ")\n";
-  };
-
-  LLVM_DEBUG(Dump("Preparing interworking stub for"));
+  assert(ThumbState != Undefined && "Undefined Thumb state preference");
 
   auto &Target = E.getTarget();
+  if (Target.isDefined()) {
+    bool TargetIsThumb = Target.getTargetFlags() & ThumbSymbol;
+    bool InterworkingStub = ThumbState == Force && !TargetIsThumb;
+    if (!InterworkingStub)
+      return false;
+  }
+
+  LLVM_DEBUG(dbgs() << "  Preparing stub with thumb-state '"
+                    << (ThumbState == Avoid ? "Avoid" : "")
+                    << (ThumbState == Prefer ? "Prefer" : "")
+                    << (ThumbState == Force ? "Force" : "")
+                    << "' for " << G.getEdgeKindName(E.getKind())
+                    << " edge at " << B->getFixupAddress(E) << " ("
+                    << B->getAddress() << " + "
+                    << formatv("{0:x}", E.getOffset()) << ")\n");
+
   assert(Target.hasName() && "Edge cannot point to anonymous target");
   auto TargetEntry = Entries.try_emplace(Target.getName()).first;
 
-  assert(ThumbState != Undefined && "Cannot select stub without defining Thumb state preference");
-
   Symbol *StubSymbol = nullptr;
-  for (auto [IsThumb, Prot, Sym] : TargetEntry->second) {
-    if (StubProt != Prot)
-      continue; // No match
-    if (IsThumb) {
+  for (auto [StubIsThumb, Sym] : TargetEntry->second) {
+    if (StubIsThumb) {
       if (ThumbState == Avoid)
         continue; // No match
       StubSymbol = Sym;
@@ -795,27 +817,25 @@ bool StubsManager<StubsFlavor::v7>::visitEdge(LinkGraph &G, Block *B, Edge &E) {
   }
 
   if (!StubSymbol) {
-    auto [SectionIt, NewSection] = Sections.try_emplace(StubProt);
-    if (NewSection) {
-      std::string Name = (getSectionName() + "_" + getRWXString(StubProt)).str();
-      SectionIt->second = &G.createSection(Name, StubProt);
-    }
+    if (!StubsSection)
+      StubsSection = &G.createSection(getSectionName(), orc::MemProt::Read | orc::MemProt::Exec);
 
-    bool IsThumb = ThumbState >= Prefer;
-    Block &B = IsThumb
-             ? createStubThumbv7(G, *SectionIt->second, Target)
-             : createStubArmv7(G, *SectionIt->second, Target);
+    bool MakeThumb = ThumbState >= Prefer;
+    Block &B = MakeThumb
+             ? createStubThumbv7(G, *StubsSection, Target)
+             : createStubArmv7(G, *StubsSection, Target);
 
     Symbol &Stub = G.addAnonymousSymbol(B, 0, B.getSize(), true, false);
-    if (IsThumb)
+    if (MakeThumb)
       Stub.setTargetFlags(ThumbSymbol);
 
     LLVM_DEBUG({
-      dbgs() << "    Created " << SectionIt->getSecond()->getName() << " entry for "
-              << Target.getName() << ": " << Stub << "\n";
+      dbgs() << "    Created " << (MakeThumb ? "Thumb" : "Arm") << " entry for "
+             << Target.getName() << " in " << StubsSection->getName() << ": "
+             << Stub << "\n";
     });
 
-    TargetEntry->second.emplace_back(IsThumb, StubProt, &Stub);
+    TargetEntry->second.emplace_back(MakeThumb, &Stub);
   }
 
   LLVM_DEBUG({
