@@ -403,6 +403,7 @@ private:
     // Parse optional stub index parameter
     int64_t StubIndex = 0;
     if (RemainingExpr.starts_with(",")) {
+      RemainingExpr = RemainingExpr.substr(1).ltrim();
       EvalResult Number;
       std::tie(Number, RemainingExpr) = evalNumberExpr(RemainingExpr);
       StubIndex = Number.getValue();

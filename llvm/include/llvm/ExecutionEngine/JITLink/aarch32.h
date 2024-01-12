@@ -341,7 +341,7 @@ public:
 
 private:
   DenseMap<StringRef, SmallVector<SymbolAndFlags>> Entries;
-  Section *StubsSection;
+  Section *StubsSection = nullptr;
 };
 
 /// Create a branch range extension stub with Thumb encoding for v7 CPUs.

@@ -693,14 +693,14 @@ const uint8_t Thumbv7ABS[] = {
 
 /// Create a new node in the link-graph for the given stub template.
 template <size_t Size>
-static Block &addStub(LinkGraph &G, Section &S, const uint8_t (&Code)[Size]) {
+static Block &allocateStub(LinkGraph &G, Section &S, const uint8_t (&Code)[Size]) {
   constexpr uint64_t Alignment = 4;
   ArrayRef<char> Template(reinterpret_cast<const char *>(Code), Size);
   return G.createContentBlock(S, Template, orc::ExecutorAddr(), Alignment, 0);
 }
 
 static Block &createStubThumbv7(LinkGraph &G, Section &S, Symbol &Target) {
-  Block &B = addStub(G, S, Thumbv7ABS);
+  Block &B = allocateStub(G, S, Thumbv7ABS);
   B.addEdge(Thumb_MovwAbsNC, 0, Target, 0);
   B.addEdge(Thumb_MovtAbs, 4, Target, 0);
 
@@ -713,7 +713,7 @@ static Block &createStubThumbv7(LinkGraph &G, Section &S, Symbol &Target) {
 }
 
 static Block &createStubArmv7(LinkGraph &G, Section &S, Symbol &Target) {
-  Block &B = addStub(G, S, Armv7ABS);
+  Block &B = allocateStub(G, S, Armv7ABS);
   B.addEdge(Arm_MovwAbsNC, 0, Target, 0);
   B.addEdge(Arm_MovtAbs, 4, Target, 0);
 
@@ -798,24 +798,7 @@ bool StubsManager<StubsFlavor::v7>::visitEdge(LinkGraph &G, Block *B, Edge &E) {
   assert(Target.hasName() && "Edge cannot point to anonymous target");
   auto TargetEntry = Entries.try_emplace(Target.getName()).first;
 
-  Symbol *StubSymbol = nullptr;
-  for (auto [StubIsThumb, Sym] : TargetEntry->second) {
-    if (StubIsThumb) {
-      if (ThumbState == Avoid)
-        continue; // No match
-      StubSymbol = Sym;
-      break; // Best match
-    }
-    if (ThumbState == Avoid) {
-      StubSymbol = Sym;
-      break; // Best match
-    }
-    if (ThumbState == Prefer) {
-      StubSymbol = Sym;
-      continue; // Acceptable match
-    }
-  }
-
+  Symbol *StubSymbol = selectStub(TargetEntry->second, ThumbState);
   if (!StubSymbol) {
     if (!StubsSection)
       StubsSection = &G.createSection(getSectionName(), orc::MemProt::Read | orc::MemProt::Exec);
@@ -825,22 +808,23 @@ bool StubsManager<StubsFlavor::v7>::visitEdge(LinkGraph &G, Block *B, Edge &E) {
              ? createStubThumbv7(G, *StubsSection, Target)
              : createStubArmv7(G, *StubsSection, Target);
 
-    Symbol &Stub = G.addAnonymousSymbol(B, 0, B.getSize(), true, false);
+    StubSymbol = &G.addAnonymousSymbol(B, 0, B.getSize(), true, false);
     if (MakeThumb)
-      Stub.setTargetFlags(ThumbSymbol);
+      StubSymbol->setTargetFlags(ThumbSymbol);
 
     LLVM_DEBUG({
       dbgs() << "    Created " << (MakeThumb ? "Thumb" : "Arm") << " entry for "
              << Target.getName() << " in " << StubsSection->getName() << ": "
-             << Stub << "\n";
+             << *StubSymbol << "\n";
     });
 
-    TargetEntry->second.emplace_back(MakeThumb, &Stub);
+    TargetEntry->second.emplace_back(MakeThumb, StubSymbol);
   }
 
   LLVM_DEBUG({
-    dbgs() << "    Using " << StubSymbol->getBlock().getSection().getName() << " entry "
-            << *StubSymbol << "\n";
+    bool StubIsThumb = StubSymbol->getTargetFlags() & ThumbSymbol;
+    dbgs() << "    Using " << (StubIsThumb ? "Thumb" : "Arm") << " entry "
+           << *StubSymbol << " in "  << StubSymbol->getBlock().getSection().getName() << "\n";
   });
 
   E.setTarget(*StubSymbol);
