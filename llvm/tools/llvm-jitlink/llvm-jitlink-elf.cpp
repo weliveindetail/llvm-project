@@ -150,9 +150,9 @@ Error registerELFGraphInfo(Session &S, LinkGraph &G) {
                                          inconvertibleErrorCode());
 
         if (auto TS = getELFStubTarget(G, Sym->getBlock()))
-          FileInfo.StubInfos[TS->getName()] = {Sym->getSymbolContent(),
-                                               Sym->getAddress().getValue(),
-                                               Sym->getTargetFlags()};
+          FileInfo.StubInfos[TS->getName()].insert(
+              0, {Sym->getSymbolContent(), Sym->getAddress().getValue(),
+                  Sym->getTargetFlags()});
         else
           return TS.takeError();
         SectionContainsContent = true;
@@ -162,9 +162,9 @@ Error registerELFGraphInfo(Session &S, LinkGraph &G) {
                                          inconvertibleErrorCode());
 
         if (auto Name = getELFAArch32StubTargetName(G, Sym->getBlock()))
-          FileInfo.StubInfos[*Name] = {Sym->getSymbolContent(),
-                                       Sym->getAddress().getValue(),
-                                       Sym->getTargetFlags()};
+          FileInfo.StubInfos[*Name].push_back({Sym->getSymbolContent(),
+                                               Sym->getAddress().getValue(),
+                                               Sym->getTargetFlags()});
         else
           return Name.takeError();
         SectionContainsContent = true;

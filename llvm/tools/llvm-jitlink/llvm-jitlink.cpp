@@ -331,8 +331,12 @@ operator<<(raw_ostream &OS, const Session::FileInfo &FI) {
     OS << "  Section \"" << SIKV.first() << "\": " << SIKV.second << "\n";
   for (auto &GOTKV : FI.GOTEntryInfos)
     OS << "  GOT \"" << GOTKV.first() << "\": " << GOTKV.second << "\n";
-  for (auto &StubKV : FI.StubInfos)
-    OS << "  Stub \"" << StubKV.first() << "\": " << StubKV.second << "\n";
+  for (auto &StubKVs : FI.StubInfos) {
+    OS << "  Stubs \"" << StubKVs.first() << "\":";
+    for (auto MemRegion : StubKVs.second)
+      OS << " " << MemRegion;
+    OS << "\n";
+  }
   return OS;
 }
 
@@ -1206,7 +1210,8 @@ Session::findSectionInfo(StringRef FileName, StringRef SectionName) {
 }
 
 Expected<Session::MemoryRegionInfo &>
-Session::findStubInfo(StringRef FileName, StringRef TargetName) {
+Session::findStubInfo(StringRef FileName, StringRef TargetName,
+                      uint64_t StubIndex) {
   auto FI = findFileInfo(FileName);
   if (!FI)
     return FI.takeError();
@@ -1216,7 +1221,12 @@ Session::findStubInfo(StringRef FileName, StringRef TargetName) {
                                        "\" registered for file \"" + FileName +
                                        "\"",
                                    inconvertibleErrorCode());
-  return StubInfoItr->second;
+  if (StubIndex >= StubInfoItr->second.size())
+    return make_error<StringError>(
+        "no stub for \"" + TargetName + " with index " + Twine(StubIndex) +
+            "\" registered for file \"" + FileName + "\"",
+        inconvertibleErrorCode());
+  return StubInfoItr->second[StubIndex];
 }
 
 Expected<Session::MemoryRegionInfo &>
@@ -1985,8 +1995,9 @@ static Error runChecks(Session &S, Triple TT, SubtargetFeatures Features) {
     return S.findSectionInfo(FileName, SectionName);
   };
 
-  auto GetStubInfo = [&S](StringRef FileName, StringRef SectionName) {
-    return S.findStubInfo(FileName, SectionName);
+  auto GetStubInfo = [&S](StringRef FileName, StringRef SectionName,
+                          int64_t StubIndex) {
+    return S.findStubInfo(FileName, SectionName, StubIndex);
   };
 
   auto GetGOTInfo = [&S](StringRef FileName, StringRef SectionName) {

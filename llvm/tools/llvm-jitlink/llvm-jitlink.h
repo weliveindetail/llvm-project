@@ -49,7 +49,7 @@ struct Session {
 
   struct FileInfo {
     StringMap<MemoryRegionInfo> SectionInfos;
-    StringMap<MemoryRegionInfo> StubInfos;
+    StringMap<SmallVector<MemoryRegionInfo, 1>> StubInfos;
     StringMap<MemoryRegionInfo> GOTEntryInfos;
   };
 
@@ -63,8 +63,8 @@ struct Session {
   Expected<FileInfo &> findFileInfo(StringRef FileName);
   Expected<MemoryRegionInfo &> findSectionInfo(StringRef FileName,
                                                StringRef SectionName);
-  Expected<MemoryRegionInfo &> findStubInfo(StringRef FileName,
-                                            StringRef TargetName);
+  Expected<MemoryRegionInfo &>
+  findStubInfo(StringRef FileName, StringRef TargetName, uint64_t StubIndex);
   Expected<MemoryRegionInfo &> findGOTEntryInfo(StringRef FileName,
                                                 StringRef TargetName);
 
