@@ -26,7 +26,7 @@ test_external_call:
 	.size test_external_call, .-test_external_call
 
 	.globl  test_external_jump
-	.type	test_external_call,%function
+	.type	test_external_jump,%function
 	.p2align	1
 	.code	16
 	.thumb_func
