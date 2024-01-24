@@ -314,7 +314,10 @@ void link_ELF_aarch32(std::unique_ptr<LinkGraph> G,
           buildTables_ELF_aarch32<aarch32::StubsManager_v7>);
       break;
     case aarch32::StubsFlavor::Undefined:
-      llvm_unreachable("Check before building graph");
+      Ctx->notifyFailed(make_error<StringError>(
+          "No Stubs flavor defined for CPU architecture " +
+              Twine(aarch32::getCPUArchName(CPU)) + " (" + Twine(CPU) + ")",
+          inconvertibleErrorCode()));
     }
   }
 

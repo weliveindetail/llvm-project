@@ -151,9 +151,19 @@ struct ArmConfig {
 inline ArmConfig getArmConfigForCPUArch(ARMBuildAttrs::CPUArch CPUArch) {
   ArmConfig ArmCfg;
   if (CPUArch == ARMBuildAttrs::v7 || CPUArch >= ARMBuildAttrs::v7E_M) {
+    // v7 and later CPUs support J1-J2 and movw/movt instructions
     ArmCfg.J1J2BranchEncoding = true;
     ArmCfg.Stubs = StubsFlavor::v7;
+  } else if (CPUArch >= ARMBuildAttrs::v5T) {
+    // v5 and v6 CPUs have no movw/movt instructions and may not support J1-J2
+    ArmCfg.J1J2BranchEncoding = false;
+    ArmCfg.Stubs = StubsFlavor::pre_v7;
   } else {
+    DEBUG_WITH_TYPE("jitlink", {
+      dbgs() << "  Warning: No explicit support for AArch32 pre-v5 CPU "
+             << getCPUArchName(CPUArch) << " (" << CPUArch
+             << "). Falling back to minimal defaults.\n";
+    });
     ArmCfg.J1J2BranchEncoding = false;
     ArmCfg.Stubs = StubsFlavor::pre_v7;
   }
