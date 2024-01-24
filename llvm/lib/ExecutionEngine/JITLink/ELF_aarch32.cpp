@@ -17,6 +17,7 @@
 #include "llvm/ExecutionEngine/JITLink/aarch32.h"
 #include "llvm/Object/ELF.h"
 #include "llvm/Object/ELFObjectFile.h"
+#include "llvm/Support/Error.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/TargetParser/ARMTargetParser.h"
 
@@ -57,6 +58,8 @@ getJITLinkEdgeKind(uint32_t ELFType, const aarch32::ArmConfig &ArmCfg) {
                                : aarch32::Data_Pointer32;
   case ELF::R_ARM_THM_CALL:
     return aarch32::Thumb_Call;
+  case ELF::R_ARM_THM_JUMP11:
+    return aarch32::Thumb_Jump11;
   case ELF::R_ARM_THM_JUMP24:
     return aarch32::Thumb_Jump24;
   case ELF::R_ARM_THM_MOVW_ABS_NC:
@@ -95,6 +98,8 @@ Expected<uint32_t> getELFRelocationType(Edge::Kind Kind) {
     return ELF::R_ARM_MOVT_ABS;
   case aarch32::Thumb_Call:
     return ELF::R_ARM_THM_CALL;
+  case aarch32::Thumb_Jump11:
+    return ELF::R_ARM_THM_JUMP11;
   case aarch32::Thumb_Jump24:
     return ELF::R_ARM_THM_JUMP24;
   case aarch32::Thumb_MovwAbsNC:

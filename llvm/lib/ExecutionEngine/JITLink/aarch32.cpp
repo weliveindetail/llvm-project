@@ -18,6 +18,7 @@
 #include "llvm/ExecutionEngine/Orc/Shared/MemoryFlags.h"
 #include "llvm/Object/ELFObjectFile.h"
 #include "llvm/Support/Endian.h"
+#include "llvm/Support/Error.h"
 #include "llvm/Support/ManagedStatic.h"
 #include "llvm/Support/MathExtras.h"
 
@@ -101,6 +102,23 @@ uint32_t encodeImmBA1BlA1BlxA2(int64_t Value) {
 ///
 int64_t decodeImmBA1BlA1BlxA2(int64_t Value) {
   return SignExtend64<26>((Value & 0x00ffffff) << 2);
+}
+
+/// Encode 12-bit immediate value for 16-bit branch instruction B2
+///
+///   00000:Imm11:0 ->  Imm11
+///
+uint32_t encodeImmB2(int64_t Value) {
+  // TODO: Is this correct? (test with sign-bit)
+  return (Value >> 1) & 0x07ff;
+}
+
+/// Decode 12-bit immediate value for 16-bit branch instruction B2
+///
+///   00000:Imm11 ->  0000:Imm11:0
+///
+int64_t decodeImmB2(uint32_t Value) {
+  return SignExtend64<12>((Value & 0x07ff) << 1);
 }
 
 /// Encode 16-bit immediate value for move instruction formats MOVT T1 and
@@ -193,12 +211,34 @@ int64_t decodeRegMovtA1MovwA2(uint64_t Value) {
 
 namespace {
 
+/// TODO: Split?
+/// 16-bit Thumb instructions are stored as a single little-endian halfword.
+struct WritableThumb16Relocation {
+  /// Create a writable reference to a Thumb32 fixup.
+  WritableThumb16Relocation(char *FixupPtr)
+      : HWd{*reinterpret_cast<support::ulittle16_t *>(FixupPtr)} {}
+
+  support::ulittle16_t &HWd;
+};
+
+struct Thumb16Relocation {
+  /// Create a read-only reference to a Thumb16 fixup.
+  Thumb16Relocation(const char *FixupPtr)
+      : HWd{*reinterpret_cast<const support::ulittle16_t *>(FixupPtr)} {}
+
+  /// Create a read-only Thumb16 fixup from a writeable one.
+  Thumb16Relocation(WritableThumb16Relocation &Writable)
+      : HWd{Writable.HWd} {}
+
+  const support::ulittle16_t &HWd;
+};
+
 /// 32-bit Thumb instructions are stored as two little-endian halfwords.
 /// An instruction at address A encodes bytes A+1, A in the first halfword (Hi),
 /// followed by bytes A+3, A+2 in the second halfword (Lo).
-struct WritableThumbRelocation {
+struct WritableThumb32Relocation {
   /// Create a writable reference to a Thumb32 fixup.
-  WritableThumbRelocation(char *FixupPtr)
+  WritableThumb32Relocation(char *FixupPtr)
       : Hi{*reinterpret_cast<support::ulittle16_t *>(FixupPtr)},
         Lo{*reinterpret_cast<support::ulittle16_t *>(FixupPtr + 2)} {}
 
@@ -206,14 +246,14 @@ struct WritableThumbRelocation {
   support::ulittle16_t &Lo; // Second halfword
 };
 
-struct ThumbRelocation {
+struct Thumb32Relocation {
   /// Create a read-only reference to a Thumb32 fixup.
-  ThumbRelocation(const char *FixupPtr)
+  Thumb32Relocation(const char *FixupPtr)
       : Hi{*reinterpret_cast<const support::ulittle16_t *>(FixupPtr)},
         Lo{*reinterpret_cast<const support::ulittle16_t *>(FixupPtr + 2)} {}
 
   /// Create a read-only Thumb32 fixup from a writeable one.
-  ThumbRelocation(WritableThumbRelocation &Writable)
+  Thumb32Relocation(WritableThumb32Relocation &Writable)
       : Hi{Writable.Hi}, Lo(Writable.Lo) {}
 
   const support::ulittle16_t &Hi; // First halfword
@@ -236,7 +276,7 @@ struct ArmRelocation {
   const support::ulittle32_t &Wd;
 };
 
-Error makeUnexpectedOpcodeError(const LinkGraph &G, const ThumbRelocation &R,
+Error makeUnexpectedOpcodeError(const LinkGraph &G, const Thumb32Relocation &R,
                                 Edge::Kind Kind) {
   return make_error<JITLinkError>(
       formatv("Invalid opcode [ {0:x4}, {1:x4} ] for relocation: {2}",
@@ -325,7 +365,7 @@ static Error checkOpcode(LinkGraph &G, const ArmRelocation &R,
   return Error::success();
 }
 
-static Error checkOpcode(LinkGraph &G, const ThumbRelocation &R,
+static Error checkOpcode(LinkGraph &G, const Thumb32Relocation &R,
                          Edge::Kind Kind) {
   assert(Kind >= FirstThumbRelocation && Kind <= LastThumbRelocation &&
          "Edge kind must be Thumb relocation");
@@ -343,7 +383,7 @@ const FixupInfoBase *FixupInfoBase::getDynFixupInfo(Edge::Kind K) {
 }
 
 template <EdgeKind_aarch32 Kind>
-bool checkRegister(const ThumbRelocation &R, HalfWords Reg) {
+bool checkRegister(const Thumb32Relocation &R, HalfWords Reg) {
   uint16_t Hi = R.Hi & FixupInfo<Kind>::RegMask.Hi;
   uint16_t Lo = R.Lo & FixupInfo<Kind>::RegMask.Lo;
   return Hi == Reg.Hi && Lo == Reg.Lo;
@@ -356,7 +396,7 @@ bool checkRegister(const ArmRelocation &R, uint32_t Reg) {
 }
 
 template <EdgeKind_aarch32 Kind>
-void writeRegister(WritableThumbRelocation &R, HalfWords Reg) {
+void writeRegister(WritableThumb32Relocation &R, HalfWords Reg) {
   static constexpr HalfWords Mask = FixupInfo<Kind>::RegMask;
   assert((Mask.Hi & Reg.Hi) == Reg.Hi && (Mask.Lo & Reg.Lo) == Reg.Lo &&
          "Value bits exceed bit range of given mask");
@@ -372,7 +412,14 @@ void writeRegister(WritableArmRelocation &R, uint32_t Reg) {
 }
 
 template <EdgeKind_aarch32 Kind>
-void writeImmediate(WritableThumbRelocation &R, HalfWords Imm) {
+void writeImmediate(WritableThumb16Relocation &R, uint16_t Imm) {
+  static constexpr uint16_t Mask = FixupInfo<Kind>::ImmMask;
+  assert((Mask & Imm) == Imm && "Value bits exceed bit range of given mask");
+  R.HWd = (R.HWd & ~Mask) | Imm;
+}
+
+template <EdgeKind_aarch32 Kind>
+void writeImmediate(WritableThumb32Relocation &R, HalfWords Imm) {
   static constexpr HalfWords Mask = FixupInfo<Kind>::ImmMask;
   assert((Mask.Hi & Imm.Hi) == Imm.Hi && (Mask.Lo & Imm.Lo) == Imm.Lo &&
          "Value bits exceed bit range of given mask");
@@ -433,7 +480,7 @@ Expected<int64_t> readAddendArm(LinkGraph &G, Block &B, Edge::OffsetT Offset,
 
 Expected<int64_t> readAddendThumb(LinkGraph &G, Block &B, Edge::OffsetT Offset,
                                   Edge::Kind Kind, const ArmConfig &ArmCfg) {
-  ThumbRelocation R(B.getContent().data() + Offset);
+  Thumb32Relocation R(B.getContent().data() + Offset);
   if (Error Err = checkOpcode(G, R, Kind))
     return std::move(Err);
 
@@ -443,6 +490,10 @@ Expected<int64_t> readAddendThumb(LinkGraph &G, Block &B, Edge::OffsetT Offset,
     return LLVM_LIKELY(ArmCfg.J1J2BranchEncoding)
                ? decodeImmBT4BlT1BlxT2_J1J2(R.Hi, R.Lo)
                : decodeImmBT4BlT1BlxT2(R.Hi, R.Lo);
+
+  case Thumb_Jump11:
+    // decodeImmB2(R.HWd) ?
+    return make_error<JITLinkError>("TODO");
 
   case Thumb_MovwAbsNC:
   case Thumb_MovwPrelNC:
@@ -596,7 +647,7 @@ Error applyFixupArm(LinkGraph &G, Block &B, const Edge &E) {
 
 Error applyFixupThumb(LinkGraph &G, Block &B, const Edge &E,
                       const ArmConfig &ArmCfg) {
-  WritableThumbRelocation R(B.getAlreadyMutableContent().data() +
+  WritableThumb32Relocation R(B.getAlreadyMutableContent().data() +
                             E.getOffset());
   Edge::Kind Kind = E.getKind();
   if (Error Err = checkOpcode(G, R, Kind))
@@ -608,6 +659,19 @@ Error applyFixupThumb(LinkGraph &G, Block &B, const Edge &E,
   uint64_t TargetAddress = TargetSymbol.getAddress().getValue();
 
   switch (Kind) {
+  case Thumb_Jump11: {
+    if (!hasTargetFlags(TargetSymbol, ThumbSymbol))
+      return make_error<JITLinkError>("Branch relocation cannot bridge to ARM: " +
+                                      StringRef(G.getEdgeKindName(Kind)));
+
+    int64_t Value = TargetAddress - FixupAddress + Addend;
+    if (!isInt<12>(Value))
+      return makeTargetOutOfRangeError(G, B, E);
+    // TODO: Split?
+    // writeImmediate<Thumb_Jump11>(R, encodeImmB2(Value));
+    return make_error<JITLinkError>("TODO");
+  }
+
   case Thumb_Jump24: {
     if (!hasTargetFlags(TargetSymbol, ThumbSymbol))
       return make_error<JITLinkError>("Branch relocation needs interworking "
@@ -809,6 +873,9 @@ static bool needsStub(const Edge &E) {
     case Thumb_Call:
     case Thumb_Jump24:
       return true;
+    case Thumb_Jump11:
+      // TODO: The docs say that this doesn't happen. We could still decide to
+      // support it.
     default:
       return false;
     }
@@ -822,6 +889,11 @@ static bool needsStub(const Edge &E) {
     return TargetIsThumb; // Branch to Thumb needs interworking stub
   case Thumb_Jump24:
     return !TargetIsThumb; // Branch to Arm needs interworking stub
+  case Thumb_Jump11:
+    // Short branches are expected to require no stubs
+    if (!TargetIsThumb) {
+      // TODO: Ideally, this would cause an error.
+    }
   default:
     break;
   }
@@ -870,7 +942,7 @@ bool StubsManager_prev7::visitEdge(LinkGraph &G, Block *B, Edge &E) {
   // The ArmThumbv5LdrPc stub has 2 entrypoints: Thumb at offset 0 is taken only
   // for Thumb B instructions. Thumb BL is rewritten to BLX and takes the Arm
   // entrypoint at offset 4. Arm branches always use that one.
-  bool UseThumb = E.getKind() == Thumb_Jump24;
+  bool UseThumb = E.getKind() == Thumb_Jump24; // Thumb_Jump11 if we decided so.
   Symbol *StubEntrypoint = getOrCreateSlotEntrypoint(G, *Slot, UseThumb);
 
   LLVM_DEBUG({
@@ -944,6 +1016,7 @@ const char *getEdgeKindName(Edge::Kind K) {
     KIND_NAME_CASE(Arm_MovwAbsNC)
     KIND_NAME_CASE(Arm_MovtAbs)
     KIND_NAME_CASE(Thumb_Call)
+    KIND_NAME_CASE(Thumb_Jump11)
     KIND_NAME_CASE(Thumb_Jump24)
     KIND_NAME_CASE(Thumb_MovwAbsNC)
     KIND_NAME_CASE(Thumb_MovtAbs)

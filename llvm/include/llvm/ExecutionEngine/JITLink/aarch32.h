@@ -18,6 +18,7 @@
 #include "llvm/ExecutionEngine/Orc/Shared/ExecutorAddress.h"
 #include "llvm/Support/ARMBuildAttributes.h"
 #include "llvm/Support/Error.h"
+#include <utility>
 
 namespace llvm {
 namespace jitlink {
@@ -83,6 +84,9 @@ enum EdgeKind_aarch32 : Edge::Kind {
   /// switch: we use the bl instruction to stay in Thumb and the blx instruction
   /// to switch to ARM.
   Thumb_Call = FirstThumbRelocation,
+
+  /// TODO: should we split the Thumb category into Thumb16 and Thumb32?
+  Thumb_Jump11,
 
   /// Write immediate value for PC-relative branch without link. The instruction
   /// can be made conditional by an IT block. If the branch target is not ARM,
@@ -231,6 +235,13 @@ template <> struct FixupInfo<Arm_MovtAbs> : public FixupInfoArmMov {
 
 template <> struct FixupInfo<Arm_MovwAbsNC> : public FixupInfoArmMov {
   static constexpr uint32_t Opcode = 0x03000000;
+};
+
+// TODO: Split? Then these fields should be uint16_t
+template <> struct FixupInfo<Thumb_Jump11> : public FixupInfoThumb {
+  static constexpr HalfWords Opcode{0xffff, 0xffff};
+  static constexpr HalfWords OpcodeMask{0xffff, 0xffff};
+  static constexpr HalfWords ImmMask{0xffff, 0xffff};
 };
 
 template <> struct FixupInfo<Thumb_Jump24> : public FixupInfoThumb {

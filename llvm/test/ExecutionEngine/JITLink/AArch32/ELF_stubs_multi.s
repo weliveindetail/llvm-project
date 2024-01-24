@@ -1,9 +1,16 @@
-# RUN: rm -rf %t && mkdir -p %t
-# RUN: llvm-mc -triple=armv7-linux-gnueabi -arm-add-build-attributes \
-# RUN:         -filetype=obj -o %t/out.o %s
+# RUN: rm -rf %t && mkdir -p %t/armv6 && mkdir -p %t/armv7
+#
+# RUN: llvm-mc -triple=armv6-linux-gnueabi -arm-add-build-attributes \
+# RUN:         -filetype=obj -o %t/armv6/out.o %s
 # RUN: llvm-jitlink -noexec -slab-address 0x76ff0000 \
 # RUN:              -slab-allocate=10Kb -slab-page-size=4096 \
-# RUN:              -abs ext=0x76bbe880 -check %s %t/out.o
+# RUN:              -abs ext=0x76bbe880 -check %s %t/armv6/out.o
+#
+# RUN: llvm-mc -triple=armv7-linux-gnueabi -arm-add-build-attributes \
+# RUN:         -filetype=obj -o %t/armv7/out.o %s
+# RUN: llvm-jitlink -noexec -slab-address 0x76ff0000 \
+# RUN:              -slab-allocate=10Kb -slab-page-size=4096 \
+# RUN:              -abs ext=0x76bbe880 -check %s %t/armv7/armv7/out.o
 
 	.text
 	.syntax unified
@@ -45,6 +52,6 @@ main:
 	push	{lr}
 	bl	test_stub_arm
 	bl	test_stub_thumb
-	movw	r0, #0
+	mov	r0, #0
 	pop	{pc}
 	.size	main, .-main
