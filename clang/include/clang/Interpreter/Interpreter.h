@@ -18,6 +18,7 @@
 #include "clang/AST/GlobalDecl.h"
 #include "clang/Interpreter/PartialTranslationUnit.h"
 #include "clang/Interpreter/Value.h"
+#include "clang/Sema/Ownership.h"
 
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ExecutionEngine/JITSymbol.h"
@@ -72,16 +73,21 @@ private:
   llvm::StringRef CudaSDKPath;
 };
 
+class RuntimeInterfaceBuilder {
+public:
+  virtual ~RuntimeInterfaceBuilder() = default;
+  virtual ExprResult getCall(Expr *E, ArrayRef<Expr *> FixedArgs) = 0;
+};
+
 /// Provides top-level interfaces for incremental compilation and execution.
 class Interpreter {
   std::unique_ptr<llvm::orc::ThreadSafeContext> TSCtx;
   std::unique_ptr<IncrementalParser> IncrParser;
   std::unique_ptr<IncrementalExecutor> IncrExecutor;
+  std::unique_ptr<RuntimeInterfaceBuilder> RuntimeIB;
 
   // An optional parser for CUDA offloading
   std::unique_ptr<IncrementalParser> DeviceParser;
-
-  Interpreter(std::unique_ptr<CompilerInstance> CI, llvm::Error &Err);
 
   llvm::Error CreateExecutor();
   unsigned InitPTUSize = 0;
@@ -91,8 +97,13 @@ class Interpreter {
   // printing happens, it's in an invalid state.
   Value LastValue;
 
+protected:
+  Interpreter(std::unique_ptr<CompilerInstance> CI, llvm::Error &Err);
+
+  void finalizeInitPTUStack();
+
 public:
-  ~Interpreter();
+  virtual ~Interpreter();
   static llvm::Expected<std::unique_ptr<Interpreter>>
   create(std::unique_ptr<CompilerInstance> CI);
   static llvm::Expected<std::unique_ptr<Interpreter>>
@@ -137,10 +148,11 @@ public:
 
   Expr *SynthesizeExpr(Expr *E);
 
+protected:
+  virtual RuntimeInterfaceBuilder *FindRuntimeInterface();
+
 private:
   size_t getEffectivePTUSize() const;
-
-  bool FindRuntimeInterface();
 
   llvm::DenseMap<CXXRecordDecl *, llvm::orc::ExecutorAddr> Dtors;
 
