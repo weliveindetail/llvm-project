@@ -629,23 +629,22 @@ class RuntimeInterfaceBuilder {
   clang::Interpreter &Interp;
   ASTContext &Ctx;
   Sema &S;
-  Expr *E;
-  InterfaceKindVisitor Visitor;
 
 public:
-  RuntimeInterfaceBuilder(clang::Interpreter &In, ASTContext &C, Sema &SemaRef,
-                          Expr *VE, ArrayRef<Expr *> FixedArgs)
-      : Interp(In), Ctx(C), S(SemaRef), E(VE), Visitor(C, SemaRef, VE) {
+  RuntimeInterfaceBuilder(clang::Interpreter &In, ASTContext &C, Sema &SemaRef)
+      : Interp(In), Ctx(C), S(SemaRef) {}
+
+  ExprResult getCall(Expr *E, ArrayRef<Expr *> FixedArgs) {
+    // Get rid of ExprWithCleanups.
+    if (auto *EWC = llvm::dyn_cast_if_present<ExprWithCleanups>(E))
+      E = EWC->getSubExpr();
+
+    InterfaceKindVisitor Visitor(Ctx, S, E);
+
     // The Interpreter* parameter and the out parameter `OutVal`.
     for (Expr *E : FixedArgs)
       Visitor.Args.push_back(E);
 
-    // Get rid of ExprWithCleanups.
-    if (auto *EWC = llvm::dyn_cast_if_present<ExprWithCleanups>(E))
-      E = EWC->getSubExpr();
-  }
-
-  ExprResult getCall() {
     QualType Ty = E->getType();
     QualType DesugaredTy = Ty.getDesugaredType(Ctx);
 
@@ -747,6 +746,8 @@ Expr *Interpreter::SynthesizeExpr(Expr *E) {
   if (!FindRuntimeInterface())
     llvm_unreachable("We can't find the runtime iterface for pretty print!");
 
+  RuntimeInterfaceBuilder Builder(*this, Ctx, S);
+
   // Create parameter `ThisInterp`.
   auto *ThisInterp = CStyleCastPtrExpr(S, Ctx.VoidPtrTy, (uintptr_t)this);
 
@@ -754,9 +755,8 @@ Expr *Interpreter::SynthesizeExpr(Expr *E) {
   auto *OutValue = CStyleCastPtrExpr(S, Ctx.VoidPtrTy, (uintptr_t)&LastValue);
 
   // Build `__clang_Interpreter_SetValue*` call.
-  RuntimeInterfaceBuilder Builder(*this, Ctx, S, E, {ThisInterp, OutValue});
+  ExprResult Result = Builder.getCall(E, {ThisInterp, OutValue});
 
-  ExprResult Result = Builder.getCall();
   // It could fail, like printing an array type in C. (not supported)
   if (Result.isInvalid())
     return E;
