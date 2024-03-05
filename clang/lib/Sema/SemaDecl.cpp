@@ -20449,6 +20449,7 @@ Decl *Sema::ActOnFileScopeAsmDecl(Expr *expr,
 TopLevelStmtDecl *Sema::ActOnStartTopLevelStmtDecl(Scope *S) {
   auto *New = TopLevelStmtDecl::Create(Context, /*Statement=*/nullptr);
   PushFunctionScope();
+  PushCompoundScope(false);
   PushDeclContext(S, New);
   return New;
 }
@@ -20456,6 +20457,7 @@ TopLevelStmtDecl *Sema::ActOnStartTopLevelStmtDecl(Scope *S) {
 void Sema::ActOnFinishTopLevelStmtDecl(TopLevelStmtDecl* D, Stmt *Statement) {
   D->setStmt(Statement);
   PopDeclContext();
+  PopCompoundScope();
   PopFunctionScopeInfo();
 }
 
