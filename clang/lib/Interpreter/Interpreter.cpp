@@ -377,21 +377,32 @@ Interpreter::Parse(llvm::StringRef Code) {
 static llvm::Expected<llvm::orc::JITTargetMachineBuilder>
 createJITTargetMachineBuilder(const std::string &TT) {
   if (TT == llvm::sys::getProcessTriple())
+    // This fails immediately if the target backend is not registered
     return llvm::orc::JITTargetMachineBuilder::detectHost();
-  // FIXME: This can fail as well if the target is not registered! We just don't
-  // catch it yet.
+
+  // If the target backend is not registered, LLJITBuilder::create() will fail
   return llvm::orc::JITTargetMachineBuilder(llvm::Triple(TT));
 }
 
+llvm::Expected<std::unique_ptr<llvm::orc::LLJITBuilder>>
+Interpreter::CreateJITBuilder(CompilerInstance &CI) {
+  auto JTMB = createJITTargetMachineBuilder(CI.getTargetOpts().Triple);
+  if (!JTMB)
+    return JTMB.takeError();
+  return IncrementalExecutor::createDefaultJITBuilder(std::move(*JTMB));
+}
+
 llvm::Error Interpreter::CreateExecutor() {
-  const clang::TargetInfo &TI =
-      getCompilerInstance()->getASTContext().getTargetInfo();
   if (IncrExecutor)
     return llvm::make_error<llvm::StringError>("Operation failed. "
                                                "Execution engine exists",
                                                std::error_code());
+  llvm::Expected<std::unique_ptr<llvm::orc::LLJITBuilder>> JB =
+      CreateJITBuilder(*getCompilerInstance());
+  if (!JB)
+    return JB.takeError();
   llvm::Error Err = llvm::Error::success();
-  auto Executor = std::make_unique<IncrementalExecutor>(*TSCtx, Err, TI);
+  auto Executor = std::make_unique<IncrementalExecutor>(*TSCtx, **JB, Err);
   if (!Err)
     IncrExecutor = std::move(Executor);
 
