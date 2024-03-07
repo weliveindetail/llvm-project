@@ -36,9 +36,11 @@
 #include "clang/Lex/PreprocessorOptions.h"
 #include "clang/Sema/Lookup.h"
 #include "llvm/ExecutionEngine/JITSymbol.h"
+#include "llvm/ExecutionEngine/Orc/JITTargetMachineBuilder.h"
 #include "llvm/ExecutionEngine/Orc/LLJIT.h"
 #include "llvm/IR/Module.h"
 #include "llvm/Support/Errc.h"
+#include "llvm/Support/Error.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/TargetParser/Host.h"
@@ -368,9 +370,22 @@ Interpreter::Parse(llvm::StringRef Code) {
   return IncrParser->Parse(Code);
 }
 
+static llvm::Expected<llvm::orc::JITTargetMachineBuilder>
+createJITTargetMachineBuilder(const std::string &TT) {
+  if (TT == llvm::sys::getProcessTriple())
+    return llvm::orc::JITTargetMachineBuilder::detectHost();
+  // FIXME: This can fail as well if the target is not registered! We just don't
+  // catch it yet.
+  return llvm::orc::JITTargetMachineBuilder(llvm::Triple(TT));
+}
+
 llvm::Error Interpreter::CreateExecutor() {
   const clang::TargetInfo &TI =
       getCompilerInstance()->getASTContext().getTargetInfo();
+  if (IncrExecutor)
+    return llvm::make_error<llvm::StringError>("Operation failed. "
+                                               "Execution engine exists",
+                                               std::error_code());
   llvm::Error Err = llvm::Error::success();
   auto Executor = std::make_unique<IncrementalExecutor>(*TSCtx, Err, TI);
   if (!Err)
@@ -378,6 +393,8 @@ llvm::Error Interpreter::CreateExecutor() {
 
   return Err;
 }
+
+void Interpreter::ResetExecutor() { IncrExecutor.reset(); }
 
 llvm::Error Interpreter::Execute(PartialTranslationUnit &T) {
   assert(T.TheModule);
