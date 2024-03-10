@@ -33,9 +33,7 @@ public:
                           llvm::Error &Err)
       : Interpreter(std::move(CI), Err) {}
 
-  llvm::Error testCreateExecutor() {
-    return Interpreter::CreateExecutor();
-  }
+  llvm::Error testCreateExecutor() { return Interpreter::CreateExecutor(); }
 
   void resetExecutor() { Interpreter::ResetExecutor(); }
 };
@@ -45,6 +43,7 @@ TEST(InterpreterExtensionsTest, ExecutorCreateReset) {
   llvm::Error ErrOut = llvm::Error::success();
   TestCreateResetExecutor Interp(cantFail(CB.CreateCpp()), ErrOut);
   cantFail(std::move(ErrOut));
+  Interp.resetExecutor();
   cantFail(Interp.testCreateExecutor());
   Interp.resetExecutor();
   cantFail(Interp.testCreateExecutor());
