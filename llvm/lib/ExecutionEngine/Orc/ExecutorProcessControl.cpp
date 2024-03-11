@@ -23,7 +23,7 @@ namespace orc {
 
 ExecutorProcessControl::MemoryAccess::~MemoryAccess() = default;
 
-ExecutorProcessControl::~ExecutorProcessControl() = default;
+ExecutorProcessControlBase::~ExecutorProcessControlBase() = default;
 
 SelfExecutorProcessControl::SelfExecutorProcessControl(
     std::shared_ptr<SymbolStringPool> SSP, std::unique_ptr<TaskDispatcher> D,

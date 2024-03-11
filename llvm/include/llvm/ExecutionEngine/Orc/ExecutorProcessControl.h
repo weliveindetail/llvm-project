@@ -32,10 +32,29 @@ namespace llvm {
 namespace orc {
 
 class ExecutionSession;
+
+/// Bare minimum ExecutorProcessControl
+class ExecutorProcessControlBase {
+  //
+public:
+  ExecutorProcessControlBase(std::shared_ptr<SymbolStringPool> SSP)
+      : SSP(std::move(SSP)) {}
+  virtual ~ExecutorProcessControlBase();
+
+  /// Intern a symbol name in the SymbolStringPool.
+  SymbolStringPtr intern(StringRef SymName) { return SSP->intern(SymName); }
+
+  /// Return a shared pointer to the SymbolStringPool for this instance.
+  std::shared_ptr<SymbolStringPool> getSymbolStringPool() const { return SSP; }
+
+protected:
+  std::shared_ptr<SymbolStringPool> SSP;
+};
+
 class SymbolLookupSet;
 
 /// ExecutorProcessControl supports interaction with a JIT target process.
-class ExecutorProcessControl {
+class ExecutorProcessControl : public ExecutorProcessControlBase {
   friend class ExecutionSession;
 public:
 
@@ -189,9 +208,7 @@ public:
 
   ExecutorProcessControl(std::shared_ptr<SymbolStringPool> SSP,
                          std::unique_ptr<TaskDispatcher> D)
-    : SSP(std::move(SSP)), D(std::move(D)) {}
-
-  virtual ~ExecutorProcessControl();
+    : ExecutorProcessControlBase(std::move(SSP)), D(std::move(D)) {}
 
   /// Return the ExecutionSession associated with this instance.
   /// Not callable until the ExecutionSession has been associated.
@@ -199,12 +216,6 @@ public:
     assert(ES && "No ExecutionSession associated yet");
     return *ES;
   }
-
-  /// Intern a symbol name in the SymbolStringPool.
-  SymbolStringPtr intern(StringRef SymName) { return SSP->intern(SymName); }
-
-  /// Return a shared pointer to the SymbolStringPool for this instance.
-  std::shared_ptr<SymbolStringPool> getSymbolStringPool() const { return SSP; }
 
   TaskDispatcher &getDispatcher() { return *D; }
 
@@ -419,8 +430,6 @@ public:
   virtual Error disconnect() = 0;
 
 protected:
-
-  std::shared_ptr<SymbolStringPool> SSP;
   std::unique_ptr<TaskDispatcher> D;
   ExecutionSession *ES = nullptr;
   Triple TargetTriple;
