@@ -92,8 +92,9 @@ public:
   void handleDisconnect(Error Err) override;
 
 private:
-  SimpleRemoteEPC(std::unique_ptr<TaskDispatcher> D)
-      : ExecutorProcessControl(std::move(D)) {}
+  SimpleRemoteEPC(std::unique_ptr<TaskDispatcher> D) : OwnedTaskDispatcher(std::move(D)) {
+    this->D = OwnedTaskDispatcher.get();
+  }
 
   static Expected<std::unique_ptr<jitlink::JITLinkMemoryManager>>
   createDefaultMemoryManager(SimpleRemoteEPC &SREPC);
@@ -127,6 +128,7 @@ private:
   std::unique_ptr<SimpleRemoteEPCTransport> T;
   std::unique_ptr<jitlink::JITLinkMemoryManager> OwnedMemMgr;
   std::unique_ptr<MemoryAccess> OwnedMemAccess;
+  std::unique_ptr<TaskDispatcher> OwnedTaskDispatcher;
 
   std::unique_ptr<EPCGenericDylibManager> DylibMgr;
   ExecutorAddr RunAsMainAddr;

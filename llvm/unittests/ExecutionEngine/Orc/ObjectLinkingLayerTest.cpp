@@ -183,7 +183,7 @@ TEST(ObjectLinkingLayerSearchGeneratorTest, AbsoluteSymbolsObjectLayer) {
   class TestEPC : public UnsupportedExecutorProcessControl {
   public:
     TestEPC()
-        : UnsupportedExecutorProcessControl(nullptr, "x86_64-apple-darwin") {}
+        : UnsupportedExecutorProcessControl("x86_64-apple-darwin") {}
 
     Expected<tpctypes::DylibHandle> loadDylib(const char *DylibPath) override {
       return ExecutorAddr::fromPtr((void *)nullptr);

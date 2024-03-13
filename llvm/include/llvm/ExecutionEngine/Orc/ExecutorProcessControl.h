@@ -187,7 +187,7 @@ public:
     ExecutorAddr JITDispatchContext;
   };
 
-  ExecutorProcessControl(std::unique_ptr<TaskDispatcher> D) : D(std::move(D)) {}
+  ExecutorProcessControl() = default;
   virtual ~ExecutorProcessControl();
 
   /// Return the ExecutionSession associated with this instance.
@@ -413,11 +413,11 @@ public:
   virtual Error disconnect() = 0;
 
 protected:
-  std::unique_ptr<TaskDispatcher> D;
   ExecutionSession *ES = nullptr;
   Triple TargetTriple;
   unsigned PageSize = 0;
   JITDispatchInfo JDI;
+  TaskDispatcher *D;
   MemoryAccess *MemAccess = nullptr;
   jitlink::JITLinkMemoryManager *MemMgr = nullptr;
   StringMap<std::vector<char>> BootstrapMap;
@@ -455,12 +455,9 @@ private:
 class UnsupportedExecutorProcessControl : public ExecutorProcessControl,
                                           private InProcessMemoryAccess {
 public:
-  UnsupportedExecutorProcessControl(std::unique_ptr<TaskDispatcher> D = nullptr,
-                                    const std::string &TT = "",
+  UnsupportedExecutorProcessControl(const std::string &TT = "",
                                     unsigned PageSize = 0)
-      : ExecutorProcessControl(D ? std::move(D)
-                                 : std::make_unique<InPlaceTaskDispatcher>()),
-        InProcessMemoryAccess(Triple(TT).isArch64Bit()) {
+      : InProcessMemoryAccess(Triple(TT).isArch64Bit()) {
     this->TargetTriple = Triple(TT);
     this->PageSize = PageSize;
     this->MemAccess = this;
@@ -537,6 +534,7 @@ private:
   jitDispatchViaWrapperFunctionManager(void *Ctx, const void *FnTag,
                                        const char *Data, size_t Size);
 
+  std::unique_ptr<TaskDispatcher> OwnedTaskDispatcher;
   std::unique_ptr<jitlink::JITLinkMemoryManager> OwnedMemMgr;
   char GlobalManglingPrefix = 0;
 };
