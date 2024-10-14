@@ -49,6 +49,10 @@ llvm_config.with_system_environment(
     ]
 )
 
+# SwiftREPL tests require SDKROOT on Windows
+if sys.platform == "win32":
+    llvm_config.with_system_environment("SDKROOT")
+
 # Enable sanitizer runtime flags.
 if "Address" in config.llvm_use_sanitizer:
     # Begin Swift mod.
