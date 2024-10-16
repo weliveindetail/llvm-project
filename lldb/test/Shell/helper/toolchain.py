@@ -151,7 +151,13 @@ def use_support_substitutions(config):
             host_flags += ["-isysroot", sdk_path]
     elif sys.platform == "win32":
         # Required in SwiftREPL tests
-        llvm_config.with_system_environment("SDKROOT")
+        sdk_path = os.environ.get("SDKROOT")
+        if sdk_path:
+            llvm_config.lit_config.note(f"using SDKROOT: {sdk_path}")
+            llvm_config.with_environment("SDKROOT", sdk_path)
+        else:
+            llvm_config.lit_config.warning(
+                "mandatory environment variable not found: SDKROOT")
     else:
         host_flags += ["-pthread"]
 
