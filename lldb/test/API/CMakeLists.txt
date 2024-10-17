@@ -39,14 +39,9 @@ option(LLDB_TEST_SWIFT "Use in-tree swift when testing lldb" On)
 if(LLDB_TEST_SWIFT)
   set(LLDB_SWIFTC ${SWIFT_BINARY_DIR}/bin/swiftc CACHE STRING "Path to swift compiler")
   set(LLDB_SWIFT_LIBS ${SWIFT_LIBRARY_DIR}/swift CACHE STRING "Path to swift libraries")
-
-  # Prefer the just-built stdlib over the system one.
-  if ( CMAKE_SYSTEM_NAME MATCHES "Windows" )
-    set(SWIFT_TEST_ARGS
-      --inferior-env "DYLD_LIBRARY_PATH=\\\"${LLDB_SWIFT_LIBS}/windows:${LLVM_LIBRARY_OUTPUT_INTDIR}/lldb/clang/lib/${LLVM_HOST_TRIPLE}\\\""
-      --inferior-env "LD_LIBRARY_PATH=\\\"${LLDB_SWIFT_LIBS}/${CMAKE_SYSTEM_PROCESSOR}\\\""
-      --inferior-env "SIMCTL_CHILD_DYLD_LIBRARY_PATH=\\\"${LLDB_SWIFT_LIBS}/windows\\\"")
-  else()
+  # Prefer the just-built stdlib over the system one. On Windows we copy DLLs and OBJs
+  # into hardcoded locations before running the test suite.
+  if(NOT WIN32)
     set(SWIFT_TEST_ARGS
       --inferior-env "DYLD_LIBRARY_PATH=\\\"${LLDB_SWIFT_LIBS}/macosx:${LLVM_LIBRARY_OUTPUT_INTDIR}/lldb/clang/lib/darwin\\\""
       --inferior-env "LD_LIBRARY_PATH=\\\"${LLDB_SWIFT_LIBS}/${CMAKE_SYSTEM_PROCESSOR}\\\""
