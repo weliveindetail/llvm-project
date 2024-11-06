@@ -2880,8 +2880,13 @@ static bool GetCompleteQualType(clang::ASTContext *ast,
         ast, llvm::cast<clang::AttributedType>(qual_type)->getModifiedType(),
         allow_completion);
 
-  case clang::Type::MemberPointer:
+  case clang::Type::MemberPointer: {
+    auto *MPT = qual_type.getTypePtr()->castAs<clang::MemberPointerType>();
+    if (MPT->getClass()->isRecordType())
+      GetCompleteRecordType(ast, clang::QualType(MPT->getClass(), 0), allow_completion);
+
     return !qual_type.getTypePtr()->isIncompleteType();
+  }
 
   default:
     break;

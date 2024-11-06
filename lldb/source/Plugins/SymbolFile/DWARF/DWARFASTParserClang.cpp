@@ -2369,6 +2369,11 @@ bool DWARFASTParserClang::CompleteRecordType(const DWARFDIE &die,
   if (record_decl)
     GetClangASTImporter().SetRecordLayout(record_decl, layout_info);
 
+  // TODO: Only necessary if we target the Microsoft C++ ABI
+  auto IM = record_decl->calculateInheritanceModel();
+  record_decl->addAttr(clang::MSInheritanceAttr::CreateImplicit(
+          m_ast.getASTContext(), true, {}, clang::MSInheritanceAttr::Spelling(IM)));
+
   // Now parse all contained types inside of the class. We make forward
   // declarations to all classes, but we need the CXXRecordDecl to have decls
   // for all contained types because we don't get asked for them via the
