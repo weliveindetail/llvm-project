@@ -196,7 +196,7 @@ macro(test_targets)
   endif()
 
   # Generate the COMPILER_RT_SUPPORTED_ARCH list.
-  if(ANDROID)
+  if(ANDROID AND NOT WIN32)
     # Examine compiler output to determine target architecture.
     detect_target_arch()
     set(COMPILER_RT_OS_SUFFIX "-android")
