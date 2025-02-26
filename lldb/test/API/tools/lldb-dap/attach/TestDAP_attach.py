@@ -55,6 +55,7 @@ class TestDAP_attach(lldbdap_testcase.DAPTestCaseBase):
         self.attach(pid=self.process.pid)
         self.set_and_hit_breakpoint(continueToExit=True)
 
+    @skipIfWindows
     @skipIfNetBSD  # Hangs on NetBSD as well
     def test_by_name(self):
         """
