@@ -239,6 +239,12 @@ if config.has_plugins and config.llvm_plugin_ext:
 if config.clang_default_pie_on_linux:
     config.available_features.add("default-pie-on-linux")
 
+pass_plugin = FindTool("libReferencePlugin.dylib")
+if pass_plugin is not None:
+    print("pass_plugin =", pass_plugin.name)
+    config.available_features.add("pass-plugins")
+    config.substitutions.append(("%pass_plugin_reference", pass_plugin.name))
+
 # Set available features we allow tests to conditionalize on.
 #
 if config.clang_default_cxx_stdlib != "":
