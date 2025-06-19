@@ -13,27 +13,23 @@
 
 using namespace llvm;
 
+static cl::opt<bool> Wave("wave-goodbye", cl::init(false),
+                          cl::desc("wave good bye"));
+
 struct TestModulePass : public PassInfoMixin<TestModulePass> {
   PreservedAnalyses run(Module &M, ModuleAnalysisManager &MAM) {
     return PreservedAnalyses::all();
   }
 
   static void registerCallbacks(PassBuilder &PB) {
+    printf("Plugin -wave-goodbye parameter value: %s\n", Wave ? "true" : "false");
+
     PB.registerPipelineEarlySimplificationEPCallback(
         [](ModulePassManager &MPM, OptimizationLevel Opt, ThinOrFullLTOPhase Phase) {
           fprintf(stderr,
                   "[llvm-py-pass] Adding pass to optimizer pipeline\n");
           MPM.addPass(TestModulePass());
           return true;
-        });
-    PB.registerPipelineParsingCallback(
-        [](StringRef Name, ModulePassManager &PM,
-           ArrayRef<PassBuilder::PipelineElement> InnerPipeline) {
-          if (Name == "plugin-pass") {
-            PM.addPass(TestModulePass());
-            return true;
-          }
-          return false;
         });
   }
 };
