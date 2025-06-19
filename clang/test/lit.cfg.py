@@ -239,7 +239,7 @@ if config.has_plugins and config.llvm_plugin_ext:
 if config.clang_default_pie_on_linux:
     config.available_features.add("default-pie-on-linux")
 
-pass_plugin_reference = os.path.join(config.llvm_shlib_dir, "libReferencePlugin.dylib")
+pass_plugin_reference = os.path.join(config.llvm_shlib_dir, "libReferencePlugin" + config.llvm_plugin_ext)
 if os.path.exists(pass_plugin_reference):
     #print("pass_plugin_reference =", pass_plugin_reference)
     config.available_features.add("pass-plugins")
