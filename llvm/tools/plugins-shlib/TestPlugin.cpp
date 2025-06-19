@@ -131,12 +131,15 @@ static void registerCallbacks(PassBuilder &PB) {
           FPM.addPass(TestFunctionPass("registerVectorizerStartEPCallback"));
           return true;
         });
+
+#if LLVM_VERSION_MAJOR > 20
   if (getEnvBool("registerVectorizerEndEPCallback"))
     PB.registerVectorizerEndEPCallback(
         [](FunctionPassManager &FPM, OptimizationLevel Opt) {
           FPM.addPass(TestFunctionPass("registerVectorizerEndEPCallback"));
           return true;
         });
+#endif
 
   // TODO: registerLateLoopOptimizationsEPCallback, registerCGSCCOptimizerLateEPCallback
 }

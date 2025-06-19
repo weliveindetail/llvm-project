@@ -1,4 +1,5 @@
 // REQUIRES: pass-plugins
+// UNSUPPORTED: system-windows
 
 // RUN: %clang -fpass-plugin=%pass_plugin_reference \
 // RUN:      -S -emit-llvm -Xclang -fdebug-pass-manager %s -o /dev/null 2>&1 | FileCheck --check-prefix=PARAM-FALSE %s
