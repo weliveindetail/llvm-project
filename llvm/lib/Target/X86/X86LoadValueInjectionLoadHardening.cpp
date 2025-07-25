@@ -39,7 +39,7 @@
 #include "ImmutableGraph.h"
 #include "X86.h"
 #include "X86Subtarget.h"
-#include "X86TargetMachine.h"
+#include "llvm/Target/X86/X86TargetMachine.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallSet.h"

@@ -17,7 +17,7 @@
 #include "MCTargetDesc/X86BaseInfo.h"
 #include "X86.h"
 #include "X86MacroFusion.h"
-#include "X86TargetMachine.h"
+#include "llvm/Target/X86/X86TargetMachine.h"
 #include "llvm/CodeGen/GlobalISel/CallLowering.h"
 #include "llvm/CodeGen/GlobalISel/InstructionSelect.h"
 #include "llvm/CodeGen/GlobalISel/InstructionSelector.h"

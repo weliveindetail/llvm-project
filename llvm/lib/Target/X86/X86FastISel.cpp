@@ -19,7 +19,7 @@
 #include "X86MachineFunctionInfo.h"
 #include "X86RegisterInfo.h"
 #include "X86Subtarget.h"
-#include "X86TargetMachine.h"
+#include "llvm/Target/X86/X86TargetMachine.h"
 #include "llvm/Analysis/BranchProbabilityInfo.h"
 #include "llvm/CodeGen/FastISel.h"
 #include "llvm/CodeGen/FunctionLoweringInfo.h"

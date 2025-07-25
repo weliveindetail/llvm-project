@@ -10,7 +10,9 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "X86TargetMachine.h"
+#include "llvm/Target/X86/X86TargetMachine.h"
+#include "X86Subtarget.h"
+
 #include "MCTargetDesc/X86MCTargetDesc.h"
 #include "TargetInfo/X86TargetInfo.h"
 #include "X86.h"
@@ -257,7 +259,7 @@ X86TargetMachine::X86TargetMachine(const Target &T, const Triple &TT,
 
 X86TargetMachine::~X86TargetMachine() = default;
 
-const X86Subtarget *
+const TargetSubtargetInfo *
 X86TargetMachine::getSubtargetImpl(const Function &F) const {
   Attribute CPUAttr = F.getFnAttribute("target-cpu");
   Attribute TuneAttr = F.getFnAttribute("tune-cpu");

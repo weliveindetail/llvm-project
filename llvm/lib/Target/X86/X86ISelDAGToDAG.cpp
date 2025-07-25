@@ -15,7 +15,7 @@
 #include "X86.h"
 #include "X86MachineFunctionInfo.h"
 #include "X86Subtarget.h"
-#include "X86TargetMachine.h"
+#include "llvm/Target/X86/X86TargetMachine.h"
 #include "llvm/ADT/Statistic.h"
 #include "llvm/CodeGen/MachineModuleInfo.h"
 #include "llvm/CodeGen/SelectionDAGISel.h"

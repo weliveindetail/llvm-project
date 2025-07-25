@@ -13,7 +13,6 @@
 #ifndef LLVM_LIB_TARGET_X86_X86TARGETMACHINE_H
 #define LLVM_LIB_TARGET_X86_X86TARGETMACHINE_H
 
-#include "X86Subtarget.h"
 #include "llvm/ADT/StringMap.h"
 #include "llvm/CodeGen/CodeGenTargetMachineImpl.h"
 #include "llvm/Support/CodeGen.h"
@@ -24,8 +23,9 @@ namespace llvm {
 
 class StringRef;
 class TargetTransformInfo;
+class X86Subtarget;
 
-class X86TargetMachine final : public CodeGenTargetMachineImpl {
+class LLVM_ABI X86TargetMachine : public CodeGenTargetMachineImpl {
   std::unique_ptr<TargetLoweringObjectFile> TLOF;
   mutable StringMap<std::unique_ptr<X86Subtarget>> SubtargetMap;
   // True if this is used in JIT.
@@ -42,11 +42,11 @@ public:
                    bool JIT);
   ~X86TargetMachine() override;
 
-  const X86Subtarget *getSubtargetImpl(const Function &F) const override;
+  const TargetSubtargetInfo *getSubtargetImpl(const Function &F) const override;
   // DO NOT IMPLEMENT: There is no such thing as a valid default subtarget,
   // subtargets are per-function entities based on the target-specific
   // attributes of each function.
-  const X86Subtarget *getSubtargetImpl() const = delete;
+  const TargetSubtargetInfo *getSubtargetImpl() const = delete;
 
   TargetTransformInfo getTargetTransformInfo(const Function &F) const override;
 

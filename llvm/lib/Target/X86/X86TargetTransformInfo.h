@@ -16,7 +16,8 @@
 #ifndef LLVM_LIB_TARGET_X86_X86TARGETTRANSFORMINFO_H
 #define LLVM_LIB_TARGET_X86_X86TARGETTRANSFORMINFO_H
 
-#include "X86TargetMachine.h"
+#include "X86Subtarget.h"
+#include "llvm/Target/X86/X86TargetMachine.h"
 #include "llvm/Analysis/TargetTransformInfo.h"
 #include "llvm/CodeGen/BasicTTIImpl.h"
 #include <optional>
@@ -111,7 +112,7 @@ class X86TTIImpl : public BasicTTIImplBase<X86TTIImpl> {
 
 public:
   explicit X86TTIImpl(const X86TargetMachine *TM, const Function &F)
-      : BaseT(TM, F.getDataLayout()), ST(TM->getSubtargetImpl(F)),
+      : BaseT(TM, F.getDataLayout()), ST(static_cast<const X86Subtarget *>(TM->getSubtargetImpl(F))),
         TLI(ST->getTargetLowering()) {}
 
   /// \name Scalar TTI Implementations

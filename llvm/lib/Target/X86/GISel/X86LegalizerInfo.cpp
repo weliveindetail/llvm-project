@@ -12,7 +12,7 @@
 
 #include "X86LegalizerInfo.h"
 #include "X86Subtarget.h"
-#include "X86TargetMachine.h"
+#include "llvm/Target/X86/X86TargetMachine.h"
 #include "llvm/CodeGen/GlobalISel/GenericMachineInstrs.h"
 #include "llvm/CodeGen/GlobalISel/LegalizerHelper.h"
 #include "llvm/CodeGen/GlobalISel/MachineIRBuilder.h"

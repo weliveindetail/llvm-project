@@ -13,7 +13,8 @@
 //===----------------------------------------------------------------------===//
 
 #include "X86.h"
-#include "X86TargetMachine.h"
+#include "X86Subtarget.h"
+#include "llvm/Target/X86/X86TargetMachine.h"
 #include "llvm/Analysis/ValueTracking.h"
 #include "llvm/CodeGen/TargetPassConfig.h"
 #include "llvm/IR/Constants.h"
@@ -504,7 +505,7 @@ bool X86PartialReduction::runOnFunction(Function &F) {
     return false;
 
   auto &TM = TPC->getTM<X86TargetMachine>();
-  ST = TM.getSubtargetImpl(F);
+  ST = static_cast<const X86Subtarget *>(TM.getSubtargetImpl(F));
 
   DL = &F.getDataLayout();
 
