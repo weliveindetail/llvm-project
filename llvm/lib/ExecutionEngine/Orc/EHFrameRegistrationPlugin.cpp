@@ -20,8 +20,8 @@ namespace llvm::orc {
 
 Expected<std::unique_ptr<EHFrameRegistrationPlugin>>
 EHFrameRegistrationPlugin::Create(ExecutionSession &ES) {
-  // Lookup addresseses of the registration/deregistration functions in the
-  // bootstrap map.
+  // Lookup addresses of the registration/deregistration functions in the
+  // bootstrap symbols.
   ExecutorAddr RegisterEHFrameSectionAllocAction;
   ExecutorAddr DeregisterEHFrameSectionAllocAction;
   if (auto Err = ES.getExecutorProcessControl().getBootstrapSymbols(

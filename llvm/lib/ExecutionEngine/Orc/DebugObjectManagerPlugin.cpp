@@ -100,14 +100,11 @@ void ELFDebugObjectSection<ELFT>::dump(raw_ostream &OS, StringRef Name) {
 }
 
 enum DebugObjectFlags : int {
-  // Request final target memory load-addresses for all sections.
-  ReportFinalSectionLoadAddresses = 1 << 0,
-
   // We found sections with debug information when processing the input object.
   HasDebugSections = 1 << 1,
 };
 
-/// The plugin creates a debug object from when JITLink starts processing the
+/// The plugin creates a debug object when JITLink starts processing the
 /// corresponding LinkGraph. It provides access to the pass configuration of
 /// the LinkGraph and calls the finalization function, once the resulting link
 /// artifact was emitted.
@@ -233,9 +230,7 @@ private:
   ELFDebugObject(std::unique_ptr<WritableMemoryBuffer> Buffer,
                  JITLinkMemoryManager &MemMgr, const JITLinkDylib *JD,
                  ExecutionSession &ES)
-      : DebugObject(MemMgr, JD, ES), Buffer(std::move(Buffer)) {
-    setFlags(ReportFinalSectionLoadAddresses);
-  }
+      : DebugObject(MemMgr, JD, ES), Buffer(std::move(Buffer)) {}
 
   std::unique_ptr<WritableMemoryBuffer> Buffer;
   StringMap<std::unique_ptr<DebugObjectSection>> Sections;
@@ -432,7 +427,7 @@ void DebugObjectManagerPlugin::notifyMaterializing(
     // Not all link artifacts allow debugging.
     if (*DebugObj == nullptr)
       return;
-    if (RequireDebugSections && !(**DebugObj).hasFlags(HasDebugSections)) {
+    if (RequireDebugSections && !DebugObj.get()->hasFlags(HasDebugSections)) {
       LLVM_DEBUG(dbgs() << "Skipping debug registration for LinkGraph '"
                         << G.getName() << "': no debug info\n");
       return;
@@ -443,101 +438,70 @@ void DebugObjectManagerPlugin::notifyMaterializing(
   }
 }
 
+DebugObject *DebugObjectManagerPlugin::getPendingDebugObj(MaterializationResponsibility &MR) {
+  std::lock_guard<std::mutex> Lock(PendingObjsLock);
+  auto It = PendingObjs.find(&MR);
+  return It == PendingObjs.end() ? nullptr : It->second.get();
+}
+
 void DebugObjectManagerPlugin::modifyPassConfig(
     MaterializationResponsibility &MR, LinkGraph &G,
     PassConfiguration &PassConfig) {
-  // Not all link artifacts have associated debug objects.
-  std::lock_guard<std::mutex> Lock(PendingObjsLock);
-  auto It = PendingObjs.find(&MR);
-  if (It == PendingObjs.end())
-    return;
-
-  DebugObject &DebugObj = *It->second;
-  if (DebugObj.hasFlags(ReportFinalSectionLoadAddresses)) {
-    PassConfig.PostAllocationPasses.push_back(
-        [&DebugObj](LinkGraph &Graph) -> Error {
-          for (const Section &GraphSection : Graph.sections())
-            DebugObj.reportSectionTargetMemoryRange(GraphSection.getName(),
-                                                    SectionRange(GraphSection));
+  PassConfig.PostAllocationPasses.push_back(
+      [this, &MR](LinkGraph &G) -> Error {
+        // Not all link artifacts have associated debug objects.
+        DebugObject *DebugObj = getPendingDebugObj(MR);
+        if (!DebugObj)
           return Error::success();
+
+        for (const Section &GraphSection : G.sections())
+          DebugObj->reportSectionTargetMemoryRange(GraphSection.getName(),
+                                                   SectionRange(GraphSection));
+        return Error::success();
+
+        DebugObj->finalizeAsync([this, &MR](Expected<ExecutorAddrRange> TargetMem) {
+          DebugObject *DebugObj = getPendingDebugObj(MR);
+          assert(DebugObj && "Debug objects must not disappear");
+
+          if (!TargetMem) {
+            DebugObj->failMaterialization(TargetMem.takeError());
+            return;
+          }
+
+          // Unblock post-fixup pass
+          DebugObj->reportTargetMem(*TargetMem);
         });
+        return Error::success();
+      });
 
-    PassConfig.PreFixupPasses.push_back(
-        [this, &DebugObj, &MR](LinkGraph &G) -> Error {
-          DebugObj.finalizeAsync([this, &DebugObj,
-                                  &MR](Expected<ExecutorAddrRange> TargetMem) {
-            if (!TargetMem) {
-              DebugObj.failMaterialization(TargetMem.takeError());
-              return;
-            }
-            // Update tracking info
-            Error Err = MR.withResourceKeyDo([&](ResourceKey K) {
-              std::lock_guard<std::mutex> LockPending(PendingObjsLock);
-              std::lock_guard<std::mutex> LockRegistered(RegisteredObjsLock);
-              auto It = PendingObjs.find(&MR);
-              RegisteredObjs[K].push_back(std::move(It->second));
-              PendingObjs.erase(It);
-            });
-
-            if (Err)
-              DebugObj.failMaterialization(std::move(Err));
-
-            // Unblock post-fixup pass
-            DebugObj.reportTargetMem(*TargetMem);
-          });
+  PassConfig.PostFixupPasses.push_back(
+      [this, &MR](LinkGraph &G) -> Error {
+        DebugObject *DebugObj = getPendingDebugObj(MR);
+        if (Expected<ExecutorAddrRange> R = DebugObj->awaitTargetMem()) {
+          // Add target memory DebugObj to __jit_debug_descriptor
+          if (!R->empty()) {
+            using namespace shared;
+            G.allocActions().push_back(
+                {cantFail(WrapperFunctionCall::Create<
+                          SPSArgList<SPSExecutorAddrRange, bool>>(
+                      RegistrationAction, *R, AutoRegisterCode)),
+                  {/* no deregistration */}});
+          }
+          // Free local DebugObj
+          std::lock_guard<std::mutex> LockPending(PendingObjsLock);
+          PendingObjs.erase(&MR);
           return Error::success();
-        });
-
-    PassConfig.PostFixupPasses.push_back(
-        [this, &DebugObj](LinkGraph &G) -> Error {
-          Expected<ExecutorAddrRange> R = DebugObj.awaitTargetMem();
-          if (!R)
-            return R.takeError();
-          if (R->empty())
-            return Error::success();
-
-          using namespace shared;
-          G.allocActions().push_back(
-              {cantFail(WrapperFunctionCall::Create<
-                        SPSArgList<SPSExecutorAddrRange, bool>>(
-                   RegistrationAction, *R, AutoRegisterCode)),
-               {/* no deregistration */}});
-          return Error::success();
-        });
-  }
+        } else {
+          // Free in local DebugObj in notifyFailed()
+          return R.takeError();
+        }
+      });
 }
 
 Error DebugObjectManagerPlugin::notifyFailed(
     MaterializationResponsibility &MR) {
   std::lock_guard<std::mutex> Lock(PendingObjsLock);
   PendingObjs.erase(&MR);
-  return Error::success();
-}
-
-void DebugObjectManagerPlugin::notifyTransferringResources(JITDylib &JD,
-                                                           ResourceKey DstKey,
-                                                           ResourceKey SrcKey) {
-  // Debug objects are stored by ResourceKey only after registration.
-  // Thus, pending objects don't need to be updated here.
-  std::lock_guard<std::mutex> Lock(RegisteredObjsLock);
-  auto SrcIt = RegisteredObjs.find(SrcKey);
-  if (SrcIt != RegisteredObjs.end()) {
-    // Resources from distinct MaterializationResponsibilitys can get merged
-    // after emission, so we can have multiple debug objects per resource key.
-    for (std::unique_ptr<DebugObject> &DebugObj : SrcIt->second)
-      RegisteredObjs[DstKey].push_back(std::move(DebugObj));
-    RegisteredObjs.erase(SrcIt);
-  }
-}
-
-Error DebugObjectManagerPlugin::notifyRemovingResources(JITDylib &JD,
-                                                        ResourceKey Key) {
-  // Removing the resource for a pending object fails materialization, so they
-  // get cleaned up in the notifyFailed() handler.
-  std::lock_guard<std::mutex> Lock(RegisteredObjsLock);
-  RegisteredObjs.erase(Key);
-
-  // TODO: Implement unregister notifications.
   return Error::success();
 }
 

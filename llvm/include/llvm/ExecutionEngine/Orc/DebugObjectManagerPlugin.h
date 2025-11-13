@@ -72,10 +72,12 @@ public:
                            MemoryBufferRef InputObject) override;
 
   Error notifyFailed(MaterializationResponsibility &MR) override;
-  Error notifyRemovingResources(JITDylib &JD, ResourceKey K) override;
+  Error notifyRemovingResources(JITDylib &JD, ResourceKey K) override {
+    return Error::success();
+  }
 
   void notifyTransferringResources(JITDylib &JD, ResourceKey DstKey,
-                                   ResourceKey SrcKey) override;
+                                   ResourceKey SrcKey) override {}
 
   void modifyPassConfig(MaterializationResponsibility &MR,
                         jitlink::LinkGraph &LG,
@@ -86,7 +88,6 @@ private:
 
   using OwnedDebugObject = std::unique_ptr<DebugObject>;
   std::map<MaterializationResponsibility *, OwnedDebugObject> PendingObjs;
-  std::map<ResourceKey, std::vector<OwnedDebugObject>> RegisteredObjs;
 
   std::mutex PendingObjsLock;
   std::mutex RegisteredObjsLock;
@@ -94,6 +95,8 @@ private:
   ExecutorAddr RegistrationAction;
   bool RequireDebugSections;
   bool AutoRegisterCode;
+
+  DebugObject *getPendingDebugObj(MaterializationResponsibility &MR);
 };
 
 } // namespace orc
