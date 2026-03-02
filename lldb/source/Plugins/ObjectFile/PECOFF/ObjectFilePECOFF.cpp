@@ -31,6 +31,7 @@
 #include "lldb/Utility/Timer.h"
 #include "lldb/Utility/UUID.h"
 
+#include "llvm/ADT/StringRef.h"
 #include "llvm/BinaryFormat/COFF.h"
 #include "llvm/Object/COFFImportFile.h"
 #include "llvm/Support/CRC.h"
@@ -143,7 +144,12 @@ static UUID GetCoffUUID(llvm::object::COFFObjectFile &coff_obj) {
 
   // First, prefer to use the PDB build id. LLD generates this even for mingw
   // targets without PDB output, and it does not get stripped either.
-  if (!coff_obj.getDebugPDBInfo(pdb_info, pdb_file) && pdb_info) {
+  if (llvm::Error Err = coff_obj.getDebugPDBInfo(pdb_info, pdb_file)) {
+    Log *log = GetLog(LLDBLog::Object);
+    llvm::StringRef file = coff_obj.getFileName();
+    LLDB_LOG_ERROR(log, std::move(Err),
+                   "Failed to read RSDS record from Codeview ({1}): {0}", file);
+  } else if (pdb_info) {
     if (pdb_info->PDB70.CVSignature == llvm::OMF::Signature::PDB70) {
       UUID::CvRecordPdb70 info;
       memcpy(&info.Uuid, pdb_info->PDB70.Signature, sizeof(info.Uuid));
