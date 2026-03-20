@@ -140,6 +140,17 @@ class SymStoreTests(TestBase):
             self.runCmd(f"settings set plugin.symbol-locator.symstore.urls {dir}")
             self.try_breakpoint(exe, should_have_loc=True)
 
+    def test_http_not_found(self):
+        """
+        Check that a 404 response from an HTTP SymStore is handled gracefully.
+        """
+        exe, sym = self.build_inferior()
+        with MockedSymStore(self, exe, sym) as symstore_dir:
+            os.makedirs(f"{symstore_dir}_empty", exist_ok=False)
+            with HTTPServer(f"{symstore_dir}_empty") as url:
+                self.runCmd(f"settings set plugin.symbol-locator.symstore.urls {url}")
+                self.try_breakpoint(exe, should_have_loc=False)
+
     # TODO: Add test coverage for common HTTPS security scenarios, e.g. self-signed
     # certs, non-HTTPS redirects, etc.
     def test_http(self):

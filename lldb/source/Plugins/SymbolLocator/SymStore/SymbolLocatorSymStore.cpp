@@ -117,47 +117,6 @@ std::string formatSymStoreKey(const UUID &uuid) {
   return llvm::toHex(bytes.slice(0, 16), LowerCase) + std::to_string(age);
 }
 
-llvm::Error downloadFileHTTP(llvm::StringRef url, llvm::StringRef destPath) {
-  if (!llvm::HTTPClient::isAvailable())
-    return llvm::createStringError(
-        std::make_error_code(std::errc::not_supported),
-        "HTTP client is not available");
-
-  llvm::HTTPClient Client;
-
-  // TODO: Since PDBs can be huge, we should distinguish between resolve,
-  // connect, send and receive.
-  Client.setTimeout(std::chrono::seconds(60));
-
-  llvm::StreamedHTTPResponseHandler Handler(
-      [&]() -> llvm::Expected<std::unique_ptr<llvm::CachedFileStream>> {
-        std::error_code EC;
-        auto FDStream = std::make_unique<llvm::raw_fd_ostream>(destPath, EC);
-        if (EC)
-          return llvm::createStringError(EC, "Failed to open file for writing");
-        return std::make_unique<llvm::CachedFileStream>(std::move(FDStream),
-                                                        destPath.str());
-      },
-      Client);
-
-  llvm::HTTPRequest Request(url);
-  Request.FollowRedirects = true;
-
-  if (llvm::Error Err = Client.perform(Request, Handler))
-    return Err;
-  if (llvm::Error Err = Handler.commit())
-    return Err;
-
-  unsigned ResponseCode = Client.responseCode();
-  if (ResponseCode != 200) {
-    return llvm::createStringError(std::make_error_code(std::errc::io_error),
-                                   "HTTP request failed with status code " +
-                                       std::to_string(ResponseCode));
-  }
-
-  return llvm::Error::success();
-}
-
 bool has_unsafe_characters(llvm::StringRef s) {
   for (unsigned char c : s) {
     // RFC 3986 unreserved characters are safe for file names and URLs.
@@ -210,13 +169,57 @@ requestFileFromSymStoreServerHTTP(llvm::StringRef base_url, llvm::StringRef key,
   // Server has same directory structure with forward slashes as separators.
   std::string source_url =
       llvm::formatv("{0}/{1}/{2}/{1}", base_url, pdb_name, key);
-  if (llvm::Error err = downloadFileHTTP(source_url, cache_file.str())) {
-    LLDB_LOG_ERROR(log, std::move(err),
-                   "Failed to download from SymStore '{1}': {0}", source_url);
+
+  if (!llvm::HTTPClient::isAvailable()) {
+    Debugger::ReportWarning("HTTP client is not available");
     return {};
   }
 
-  return FileSpec(cache_file.str());
+  llvm::HTTPClient Client;
+  // TODO: Since PDBs can be huge, we should distinguish between resolve,
+  // connect, send and receive.
+  Client.setTimeout(std::chrono::seconds(60));
+
+  llvm::StreamedHTTPResponseHandler Handler(
+      [dest = cache_file.str().str()]()
+          -> llvm::Expected<std::unique_ptr<llvm::CachedFileStream>> {
+        std::error_code EC;
+        auto FDStream = std::make_unique<llvm::raw_fd_ostream>(dest, EC);
+        if (EC)
+          return llvm::createStringError(EC, "Failed to open file for writing");
+        return std::make_unique<llvm::CachedFileStream>(std::move(FDStream),
+                                                        dest);
+      },
+      Client);
+
+  llvm::HTTPRequest Request(source_url);
+  Request.FollowRedirects = true;
+
+  if (llvm::Error Err = Client.perform(Request, Handler)) {
+    Debugger::ReportWarning(
+        llvm::formatv("Failed to download from SymStore '{0}': {1}", source_url,
+                      llvm::toString(std::move(Err))));
+    return {};
+  }
+  if (llvm::Error Err = Handler.commit()) {
+    Debugger::ReportWarning(
+        llvm::formatv("Failed to download from SymStore '{0}': {1}", source_url,
+                      llvm::toString(std::move(Err))));
+    return {};
+  }
+
+  unsigned ResponseCode = Client.responseCode();
+  switch (ResponseCode) {
+  case 404:
+    return {}; // file not found
+  case 200:
+    return FileSpec(cache_file.str()); // success
+  default:
+    Debugger::ReportWarning(llvm::formatv(
+        "Failed to download from SymStore '{0}': response code {1}", source_url,
+        ResponseCode));
+    return {};
+  }
 }
 
 std::optional<FileSpec> findFileInLocalSymStore(llvm::StringRef root_dir,
