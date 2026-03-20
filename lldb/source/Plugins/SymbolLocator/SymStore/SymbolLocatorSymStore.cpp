@@ -133,14 +133,12 @@ bool has_unsafe_characters(llvm::StringRef s) {
   return s == "." || s == "..";
 }
 
-// TODO: This is a dump initial implementation: It always downloads the file, it
-// doesn't validate the result, it doesn't employ proper buffering for large
-// files.
+// TODO: This is a dump initial implementation: It always downloads the file and
+// doesn't validate the result.
 std::optional<FileSpec>
 requestFileFromSymStoreServerHTTP(llvm::StringRef base_url, llvm::StringRef key,
                                   llvm::StringRef pdb_name) {
   using namespace llvm::sys;
-  Log *log = GetLog(LLDBLog::Symbols);
 
   // Make sure URL will be valid, portable, and compatible with symbol servers.
   if (has_unsafe_characters(pdb_name)) {
@@ -193,8 +191,6 @@ requestFileFromSymStoreServerHTTP(llvm::StringRef base_url, llvm::StringRef key,
       Client);
 
   llvm::HTTPRequest Request(source_url);
-  Request.FollowRedirects = true;
-
   if (llvm::Error Err = Client.perform(Request, Handler)) {
     Debugger::ReportWarning(
         llvm::formatv("Failed to download from SymStore '{0}': {1}", source_url,
