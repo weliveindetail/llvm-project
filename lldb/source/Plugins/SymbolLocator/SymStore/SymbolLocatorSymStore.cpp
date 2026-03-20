@@ -18,11 +18,14 @@
 #include "lldb/Utility/UUID.h"
 
 #include "llvm/ADT/StringExtras.h"
+#include "llvm/Support/Caching.h"
 #include "llvm/Support/Endian.h"
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/FormatVariadic.h"
 #include "llvm/Support/HTTP/HTTPClient.h"
+#include "llvm/Support/HTTP/StreamedHTTPResponseHandler.h"
 #include "llvm/Support/Path.h"
+#include "llvm/Support/raw_ostream.h"
 
 using namespace lldb;
 using namespace lldb_private;
@@ -114,36 +117,11 @@ std::string formatSymStoreKey(const UUID &uuid) {
   return llvm::toHex(bytes.slice(0, 16), LowerCase) + std::to_string(age);
 }
 
-// This is a simple version of Debuginfod's StreamedHTTPResponseHandler. We
-// should consider reusing that once we introduce caching.
-class FileDownloadHandler : public llvm::HTTPResponseHandler {
-private:
-  std::error_code m_ec;
-  llvm::raw_fd_ostream m_stream;
-
-public:
-  FileDownloadHandler(llvm::StringRef file) : m_stream(file.str(), m_ec) {}
-  virtual ~FileDownloadHandler() = default;
-
-  llvm::Error handleBodyChunk(llvm::StringRef data) override {
-    // Propagate error from ctor.
-    if (m_ec)
-      return llvm::createStringError(m_ec, "Failed to open file for writing");
-    m_stream.write(data.data(), data.size());
-    if (std::error_code ec = m_stream.error())
-      return llvm::createStringError(ec, "Error writing to file");
-
-    return llvm::Error::success();
-  }
-};
-
-llvm::Error downloadFileHTTP(llvm::StringRef url, FileDownloadHandler dest) {
+llvm::Error downloadFileHTTP(llvm::StringRef url, llvm::StringRef destPath) {
   if (!llvm::HTTPClient::isAvailable())
     return llvm::createStringError(
         std::make_error_code(std::errc::not_supported),
         "HTTP client is not available");
-  llvm::HTTPRequest Request(url);
-  Request.FollowRedirects = true;
 
   llvm::HTTPClient Client;
 
@@ -151,7 +129,23 @@ llvm::Error downloadFileHTTP(llvm::StringRef url, FileDownloadHandler dest) {
   // connect, send and receive.
   Client.setTimeout(std::chrono::seconds(60));
 
-  if (llvm::Error Err = Client.perform(Request, dest))
+  llvm::StreamedHTTPResponseHandler Handler(
+      [&]() -> llvm::Expected<std::unique_ptr<llvm::CachedFileStream>> {
+        std::error_code EC;
+        auto FDStream = std::make_unique<llvm::raw_fd_ostream>(destPath, EC);
+        if (EC)
+          return llvm::createStringError(EC, "Failed to open file for writing");
+        return std::make_unique<llvm::CachedFileStream>(std::move(FDStream),
+                                                        destPath.str());
+      },
+      Client);
+
+  llvm::HTTPRequest Request(url);
+  Request.FollowRedirects = true;
+
+  if (llvm::Error Err = Client.perform(Request, Handler))
+    return Err;
+  if (llvm::Error Err = Handler.commit())
     return Err;
 
   unsigned ResponseCode = Client.responseCode();
