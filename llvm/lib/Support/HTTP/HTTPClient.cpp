@@ -155,6 +155,7 @@ struct WinHTTPSession {
   HINTERNET ConnectHandle = nullptr;
   HINTERNET RequestHandle = nullptr;
   DWORD ResponseCode = 0;
+  DWORD TimeoutMs = 0;
 
   ~WinHTTPSession() {
     if (RequestHandle)
@@ -226,15 +227,7 @@ void HTTPClient::cleanup() {
 
 void HTTPClient::setTimeout(std::chrono::milliseconds Timeout) {
   WinHTTPSession *Session = static_cast<WinHTTPSession *>(Handle);
-  if (Session && Session->SessionHandle) {
-    DWORD TimeoutMs = static_cast<DWORD>(Timeout.count());
-    WinHttpSetOption(Session->SessionHandle, WINHTTP_OPTION_CONNECT_TIMEOUT,
-                     &TimeoutMs, sizeof(TimeoutMs));
-    WinHttpSetOption(Session->SessionHandle, WINHTTP_OPTION_RECEIVE_TIMEOUT,
-                     &TimeoutMs, sizeof(TimeoutMs));
-    WinHttpSetOption(Session->SessionHandle, WINHTTP_OPTION_SEND_TIMEOUT,
-                     &TimeoutMs, sizeof(TimeoutMs));
-  }
+  Session->TimeoutMs = static_cast<DWORD>(Timeout.count());
 }
 
 Error HTTPClient::perform(const HTTPRequest &Request,
@@ -265,6 +258,16 @@ Error HTTPClient::perform(const HTTPRequest &Request,
                   WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
   if (!Session->SessionHandle)
     return createStringError(errc::io_error, "Failed to open WinHTTP session");
+
+  // Apply timeout if configured
+  if (Session->TimeoutMs > 0) {
+    WinHttpSetOption(Session->SessionHandle, WINHTTP_OPTION_CONNECT_TIMEOUT,
+                     &Session->TimeoutMs, sizeof(Session->TimeoutMs));
+    WinHttpSetOption(Session->SessionHandle, WINHTTP_OPTION_SEND_TIMEOUT,
+                     &Session->TimeoutMs, sizeof(Session->TimeoutMs));
+    WinHttpSetOption(Session->SessionHandle, WINHTTP_OPTION_RECEIVE_TIMEOUT,
+                     &Session->TimeoutMs, sizeof(Session->TimeoutMs));
+  }
 
   // Prevent fallback to TLS 1.0/1.1
   DWORD SecureProtocols =
