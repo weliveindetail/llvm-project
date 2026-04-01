@@ -155,7 +155,7 @@ struct WinHTTPSession {
   HINTERNET ConnectHandle = nullptr;
   HINTERNET RequestHandle = nullptr;
   DWORD ResponseCode = 0;
-  DWORD TimeoutMs = 0;
+  DWORD TimeoutMs = 30000;
 
   ~WinHTTPSession() {
     if (RequestHandle)
@@ -259,15 +259,11 @@ Error HTTPClient::perform(const HTTPRequest &Request,
   if (!Session->SessionHandle)
     return createStringError(errc::io_error, "Failed to open WinHTTP session");
 
-  // Apply timeout if configured
-  if (Session->TimeoutMs > 0) {
-    WinHttpSetOption(Session->SessionHandle, WINHTTP_OPTION_CONNECT_TIMEOUT,
-                     &Session->TimeoutMs, sizeof(Session->TimeoutMs));
-    WinHttpSetOption(Session->SessionHandle, WINHTTP_OPTION_SEND_TIMEOUT,
-                     &Session->TimeoutMs, sizeof(Session->TimeoutMs));
-    WinHttpSetOption(Session->SessionHandle, WINHTTP_OPTION_RECEIVE_TIMEOUT,
-                     &Session->TimeoutMs, sizeof(Session->TimeoutMs));
-  }
+  // Set timeouts for all 4 phases: resolve, connect, send and receive. Resolve
+  // and connect are hard-coded since they don't vary with different payloads.
+  // Send and receive is configurable and defaults to 30000.
+  WinHttpSetTimeouts(Session->SessionHandle, 5000, 10000, Session->TimeoutMs,
+                     Session->TimeoutMs);
 
   // Prevent fallback to TLS 1.0/1.1
   DWORD SecureProtocols =
