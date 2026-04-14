@@ -346,26 +346,26 @@ LocateSymStoreEntry(const SymbolLocatorSymStore::LookupEntry &entry,
     // Check cache first.
     if (entry.cache) {
       if (auto spec = FindFileInLocalSymStore(*entry.cache, key, pdb_name)) {
-        LLDB_LOG_VERBOSE(log, "Found {0} in SymStore cache {1}", pdb_name,
-                         *entry.cache);
+        LLDB_LOG(log, "Found {0} in SymStore cache {1}", pdb_name,
+                 *entry.cache);
         return *spec;
       }
     } else {
       // Check LLDB default cache to avoid duplicate downloads in the same
       // session.
       if (auto spec = FindFileInLocalSymStore(default_cache, key, pdb_name)) {
-        LLDB_LOG_VERBOSE(log, "Found {0} in SymStore cache {1}", pdb_name,
-                         default_cache);
+        LLDB_LOG(log, "Found {0} in SymStore cache {1}", pdb_name,
+                 default_cache);
         return *spec;
       }
     }
 
     // Download and move to cache.
     if (auto spec = RequestFileFromSymStoreServerHTTP(url, key, pdb_name)) {
-      LLDB_LOG_VERBOSE(log, "Downloaded {0} from SymStore {1}", pdb_name, url);
+      LLDB_LOG(log, "Downloaded {0} from SymStore {1}", pdb_name, url);
       std::string cache = entry.cache.value_or(default_cache);
       spec = MoveToLocalSymStore(cache, key, pdb_name, *spec);
-      LLDB_LOG_VERBOSE(log, "Added {0} to SymStore cache {1}", pdb_name, cache);
+      LLDB_LOG(log, "Added {0} to SymStore cache {1}", pdb_name, cache);
       return *spec;
     }
 
@@ -376,7 +376,7 @@ LocateSymStoreEntry(const SymbolLocatorSymStore::LookupEntry &entry,
   if (file.starts_with("file://"))
     file = file.drop_front(7);
   if (auto spec = FindFileInLocalSymStore(file, key, pdb_name)) {
-    LLDB_LOG_VERBOSE(log, "Found {0} in local SymStore {1}", pdb_name, file);
+    LLDB_LOG(log, "Found {0} in local SymStore {1}", pdb_name, file);
     return *spec;
   }
 
@@ -396,15 +396,14 @@ std::optional<FileSpec> SymbolLocatorSymStore::LocateExecutableSymbolFile(
   std::string pdb_name =
       module_spec.GetSymbolFileSpec().GetFilename().GetStringRef().str();
   if (pdb_name.empty()) {
-    LLDB_LOG_VERBOSE(log,
-                     "Failed to resolve symbol PDB module: PDB name empty");
+    LLDB_LOG(log, "Failed to resolve symbol PDB module: PDB name empty");
     return {};
   }
 
-  LLDB_LOG_VERBOSE(log, "LocateExecutableSymbolFile {0} with UUID {1}",
-                   pdb_name, uuid.GetAsString());
+  LLDB_LOG(log, "LocateExecutableSymbolFile {0} with UUID {1}", pdb_name,
+           uuid.GetAsString());
   if (uuid.GetBytes().size() != 20) {
-    LLDB_LOG_VERBOSE(log, "Failed to resolve symbol PDB module: UUID invalid");
+    LLDB_LOG(log, "Failed to resolve symbol PDB module: UUID invalid");
     return {};
   }
 
