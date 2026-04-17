@@ -58,6 +58,8 @@ class MockedSymStore:
             self._test.getBuildArtifact(self._pdb),
             os.path.join(pdb_dir, self._pdb),
         )
+        # We always configure a valid fallback cache, because we might not have
+        # permission to write outside the test directory.
         self._test.runCmd(
             f"settings set plugin.symbol-locator.symstore.cache {self.cache_dir}"
         )
@@ -139,6 +141,10 @@ class SymStoreTests(TestBase):
         self.assertTrue(os.path.isfile(self.getBuildArtifact(sym_file)))
         return exe_file, sym_file
 
+    def assertFiles(self, dir, expected):
+        actual = sum(len(f) for _, _, f in os.walk(dir))
+        self.assertEqual(actual, expected)
+
     def try_breakpoint(self, exe, should_have_loc, ext_lookup=True):
         enable = "true" if ext_lookup else "false"
         self.runCmd(f"settings set symbols.enable-external-lookup {enable}")
@@ -207,8 +213,8 @@ class SymStoreTests(TestBase):
 
     def test_nt_symbol_path_local(self):
         """
-        Check that breakpoint resolves with a local SymStore path in
-        _NT_SYMBOL_PATH, and that the PDB is not copied to the cache.
+        Check that breakpoint resolves with a local SymStore path in _NT_SYMBOL_PATH.
+        The PDB is not copied to the configured cache.
         """
         exe, sym = self.build_inferior()
         symstore = MockedSymStore(self, exe, sym)
@@ -224,8 +230,8 @@ class SymStoreTests(TestBase):
 
     def test_nt_symbol_path_srv(self):
         """
-        Check that breakpoint resolves with an HTTP symbol server in
-        _NT_SYMBOL_PATH using the srv* syntax, and that the PDB is cached.
+        Check that breakpoint resolves with an HTTP symbol server in _NT_SYMBOL_PATH
+        using the srv* notation. The PDB is stored in the configured cache.
         """
         exe, sym = self.build_inferior()
         symstore = MockedSymStore(self, exe, sym)
@@ -238,6 +244,33 @@ class SymStoreTests(TestBase):
             self.assertTrue(os.path.isfile(cache_file))
             cached_files = sum(len(f) for _, _, f in os.walk(symstore.cache_dir))
             self.assertEqual(cached_files, 1)
+
+    def test_nt_symbol_path_cache(self):
+        """
+        Check PDB storage with various cache settings in _NT_SYMBOL_PATH.
+        """
+        exe, sym = self.build_inferior()
+        symstore = MockedSymStore(self, exe, sym)
+        with symstore as dir:
+            with HTTPServer(dir) as url:
+                # Stored in explicit cache from srv* notation
+                special_cache1 = self.getBuildArtifact("special_cache1")
+                with NtSymbolPath(f"srv*{special_cache1}*{url}"):
+                    self.try_breakpoint(exe, should_have_loc=True)
+                self.assertFiles(special_cache1, 1)
+
+                # Stored in implicit cache from cache* notation
+                special_cache2 = self.getBuildArtifact("special_cache2")
+                with NtSymbolPath(f"cache*{special_cache2};srv*{url}"):
+                    self.try_breakpoint(exe, should_have_loc=True)
+                self.assertFiles(special_cache2, 1)
+
+                # Stored in configured default cache if provided path is invalid
+                invalid_cache = ":\\<invalid_path>"
+                self.assertFiles(symstore.cache_dir, 0)
+                with NtSymbolPath(f"cache*{invalid_cache};srv*{url}"):
+                    self.try_breakpoint(exe, should_have_loc=True)
+                self.assertFiles(symstore.cache_dir, 1)
 
     def test_lookup_order(self):
         """
