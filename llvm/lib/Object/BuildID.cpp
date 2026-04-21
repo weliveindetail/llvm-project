@@ -111,6 +111,6 @@ Expected<std::string> BuildIDFetcher::fetch(BuildIDRef BuildID) const {
   }
   return createStringError(
       make_error_code(std::errc::no_such_file_or_directory),
-      "could not find debug file for build ID '" +
-          llvm::toHex(BuildID, /*LowerCase=*/true) + "'");
+      "Missing binary ID: " +
+          llvm::toHex(BuildID, /*LowerCase=*/true));
 }
