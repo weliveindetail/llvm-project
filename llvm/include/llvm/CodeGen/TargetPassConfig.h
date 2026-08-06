@@ -17,7 +17,9 @@
 #include "llvm/Support/CodeGen.h"
 #include "llvm/Support/Compiler.h"
 #include "llvm/Support/Error.h"
+#include "llvm/Target/TargetOptions.h"
 #include <cassert>
+#include <optional>
 #include <string>
 
 namespace llvm {
@@ -477,6 +479,14 @@ protected:
 
 LLVM_ABI void registerCodeGenCallback(PassInstrumentationCallbacks &PIC,
                                       TargetMachine &);
+
+// Accessor functions for cross-DSO access to command-line option values
+// (e.g., for plugins that statically embed the backend).
+namespace codegen {
+LLVM_ABI std::optional<bool> getEnableFastISelOption();
+LLVM_ABI std::optional<bool> getEnableGlobalISelOption();
+LLVM_ABI std::optional<GlobalISelAbortMode> getEnableGlobalISelAbort();
+} // namespace codegen
 
 } // end namespace llvm
 

@@ -406,6 +406,42 @@ struct InsertedPass {
 
 } // end anonymous namespace
 
+// Accessor functions to expose command-line options for cross-DSO access
+// (e.g., for plugins that embed the backend). These allow the plugin to
+// query the host's option values instead of using its own isolated copies.
+#ifndef BACKEND_PLUGIN_BUILD
+namespace llvm {
+namespace codegen {
+
+std::optional<bool> getEnableFastISelOption() {
+  switch (EnableFastISelOption) {
+  case cl::BOU_TRUE: return true;
+  case cl::BOU_FALSE: return false;
+  case cl::BOU_UNSET: return std::nullopt;
+  }
+  llvm_unreachable("Invalid boolOrDefault value");
+}
+
+std::optional<bool> getEnableGlobalISelOption() {
+  switch (EnableGlobalISelOption) {
+  case cl::BOU_TRUE: return true;
+  case cl::BOU_FALSE: return false;
+  case cl::BOU_UNSET: return std::nullopt;
+  }
+  llvm_unreachable("Invalid boolOrDefault value");
+}
+
+std::optional<GlobalISelAbortMode> getEnableGlobalISelAbort() {
+  // For enums, we need to check if the option was explicitly set
+  if (EnableGlobalISelAbort.getNumOccurrences() > 0)
+    return EnableGlobalISelAbort.getValue();
+  return std::nullopt;
+}
+
+} // namespace codegen
+} // namespace llvm
+#endif
+
 namespace llvm {
 
 class PassConfigImpl {
@@ -620,8 +656,8 @@ TargetPassConfig::TargetPassConfig(TargetMachine &TM, PassManagerBase &PM)
   if (TM.Options.EnableIPRA)
     setRequiresCodeGenSCCOrder();
 
-  if (EnableGlobalISelAbort.getNumOccurrences())
-    TM.Options.GlobalISelAbort = EnableGlobalISelAbort;
+  if (auto AbortMode = codegen::getEnableGlobalISelAbort())
+    TM.Options.GlobalISelAbort = *AbortMode;
 
   setStartStopPasses();
 }
@@ -998,17 +1034,19 @@ void TargetPassConfig::addISelPrepare() {
 
 bool TargetPassConfig::addCoreISelPasses() {
   // Enable FastISel with -fast-isel, but allow that to be overridden.
-  TM->setO0WantsFastISel(EnableFastISelOption != cl::BOU_FALSE);
+  auto FastISelOpt = codegen::getEnableFastISelOption();
+  auto GlobalISelOpt = codegen::getEnableGlobalISelOption();
+
+  TM->setO0WantsFastISel(FastISelOpt != false);
 
   // Determine an instruction selector.
   enum class SelectorType { SelectionDAG, FastISel, GlobalISel };
   SelectorType Selector;
 
-  if (EnableFastISelOption == cl::BOU_TRUE)
+  if (FastISelOpt == true)
     Selector = SelectorType::FastISel;
-  else if (EnableGlobalISelOption == cl::BOU_TRUE ||
-           (TM->Options.EnableGlobalISel &&
-            EnableGlobalISelOption != cl::BOU_FALSE))
+  else if (GlobalISelOpt == true ||
+           (TM->Options.EnableGlobalISel && GlobalISelOpt != false))
     Selector = SelectorType::GlobalISel;
   else if (TM->getOptLevel() == CodeGenOptLevel::None &&
            TM->getO0WantsFastISel())
