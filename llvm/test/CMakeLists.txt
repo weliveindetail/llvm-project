@@ -207,6 +207,11 @@ if (TARGET CGTestPlugin)
   list(APPEND LLVM_TEST_DEPENDS CGTestPlugin)
 endif()
 
+add_subdirectory(Feature/Plugins)
+if (TARGET BackendPluginAArch64)
+  list(APPEND LLVM_TEST_DEPENDS BackendPluginAArch64)
+endif()
+
 if(LLVM_INCLUDE_EXAMPLES)
   list(APPEND LLVM_TEST_DEPENDS
     Kaleidoscope-Ch3
