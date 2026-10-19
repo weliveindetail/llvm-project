@@ -199,13 +199,17 @@ Error Config::addSaveTemps(std::string OutputFileName, bool UseInputModulePath,
 #include "llvm/Support/Extension.def"
 #undef HANDLE_EXTENSION
 
-// Obtain dynamic pass-plugin infos for the given config in registration order
+// Obtain all pass-plugin infos for the given config in registration order
 static SmallVector<PassPluginLibraryInfo, 0>
 getPassPlugins(const Config &Conf) {
   // lto::LTO loads plugins requested by file name before running backends
   assert(Conf.PassPluginFilenames.empty() &&
          "Pass-plugins must be loaded before running LTO backends");
+  // FIXME: opt and clang register dynamic plugins before static ones
   SmallVector<PassPluginLibraryInfo, 0> Plugins;
+#define HANDLE_EXTENSION(Ext) Plugins.push_back(get##Ext##PluginInfo());
+#include "llvm/Support/Extension.def"
+#undef HANDLE_EXTENSION
   for (const PassPlugin *Plugin : Conf.LoadedPassPlugins)
     Plugins.push_back(Plugin->getInfo());
   return Plugins;
@@ -213,13 +217,6 @@ getPassPlugins(const Config &Conf) {
 
 // Call pass builder registration callbacks for all pass-plugins
 static void RegisterPassPlugins(const Config &Conf, PassBuilder &PB) {
-  // Static built-in plugins
-#define HANDLE_EXTENSION(Ext)                                                  \
-  get##Ext##PluginInfo().RegisterPassBuilderCallbacks(PB);
-#include "llvm/Support/Extension.def"
-#undef HANDLE_EXTENSION
-
-  // Dynamic plugins
   for (const PassPluginLibraryInfo &Plugin : getPassPlugins(Conf))
     if (Plugin.RegisterPassBuilderCallbacks)
       Plugin.RegisterPassBuilderCallbacks(PB);
