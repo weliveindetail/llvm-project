@@ -1222,6 +1222,13 @@ void EmitAssemblyHelper::RunCodegenPipeline(
     if (Plugin->invokePreCodeGenCallback(*TheModule, *TM, CGFT, *OS))
       return;
   }
+  // Static plugin extensions run after dynamic ones, same as when registering
+  // pass builder callbacks.
+#define HANDLE_EXTENSION(Ext)                                                  \
+  if (auto *Callback = get##Ext##PluginInfo().PreCodeGenCallback)              \
+    if (Callback(*TheModule, *TM, CGFT, *OS))                                  \
+      return;
+#include "llvm/Support/Extension.def"
 
   if (!CodeGenOpts.SplitDwarfOutput.empty()) {
     DwoOS = openOutputFile(CodeGenOpts.SplitDwarfOutput);
