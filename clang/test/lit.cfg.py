@@ -144,6 +144,8 @@ if config.clang_examples:
     config.available_features.add("examples")
 if config.llvm_examples:
     config.available_features.add("llvm-examples")
+if config.linked_bye_extension:
+    config.available_features.add("linked-bye")
 
 
 def have_host_out_of_process_jit_feature_support():

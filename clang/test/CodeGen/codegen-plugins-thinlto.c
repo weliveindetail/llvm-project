@@ -1,5 +1,7 @@
 // REQUIRES: plugins, llvm-examples
 // UNSUPPORTED: target={{.*windows.*}}
+// Bye.so is not built if Bye is linked into the tools.
+// UNSUPPORTED: linked-bye
 // Plugins are currently broken on AIX, at least in the CI.
 // XFAIL: target={{.*}}-aix{{.*}}
 

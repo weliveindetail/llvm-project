@@ -1,4 +1,6 @@
 ; REQUIRES: x86-registered-target, plugins, llvm-examples
+; Bye.so is not built if Bye is linked into the tools.
+; UNSUPPORTED: linked-bye
 ; There is an issue with export symbols on AIX that is currently
 ; causing this test case to fail. XFAIL for now.
 ; XFAIL: system-aix

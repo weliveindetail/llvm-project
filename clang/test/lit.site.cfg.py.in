@@ -29,6 +29,7 @@ config.clang_staticanalyzer_z3_mock = @TEST_WITH_Z3_MOCK@
 config.clang_enable_cir = @CLANG_ENABLE_CIR@
 config.clang_examples = @CLANG_BUILD_EXAMPLES@
 config.llvm_examples = @LLVM_INCLUDE_EXAMPLES@
+config.linked_bye_extension = @LLVM_BYE_LINK_INTO_TOOLS@
 config.enable_shared = @ENABLE_SHARED@
 config.enable_backtrace = @ENABLE_BACKTRACES@
 config.enable_threads = @LLVM_ENABLE_THREADS@
