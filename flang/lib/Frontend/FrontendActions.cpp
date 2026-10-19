@@ -934,6 +934,13 @@ static void generateMachineCodeOrAssemblyImpl(
   for (const std::unique_ptr<llvm::PassPlugin> &plugin : ci.getPassPlugins())
     if (plugin->invokePreCodeGenCallback(llvmModule, tm, cgft, os))
       return;
+  // Static plugin extensions run after dynamic ones, same as when registering
+  // pass builder callbacks.
+#define HANDLE_EXTENSION(Ext)                                                  \
+  if (auto *callback = get##Ext##PluginInfo().PreCodeGenCallback)              \
+    if (callback(llvmModule, tm, cgft, os))                                    \
+      return;
+#include "llvm/Support/Extension.def"
 
   std::unique_ptr<llvm::ToolOutputFile> dwoOS;
   if (!codeGenOpts.SplitDwarfOutput.empty()) {
