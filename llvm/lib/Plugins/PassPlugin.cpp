@@ -64,11 +64,11 @@ Error llvm::passPluginArguments(ArrayRef<PassPluginLibraryInfo> Infos,
     auto [Name, Rest] = StringRef(Arg).split(',');
     // Rest is null without a comma and empty for an empty argument.
     if (!Rest.data())
-      return createStringError("expected <plugin>,<arg> in -plugin-arg=" + Arg);
+      return createStringError("expected <plugin>,<arg> in '" + Arg + "'");
     auto It = Index.find(Name);
     if (It == Index.end())
       return createStringError("no pass plugin named '" + Name +
-                               "' is loaded, in -plugin-arg=" + Arg);
+                               "' is loaded, in '" + Arg + "'");
     PluginArgs[It->second].push_back(Rest.data());
   }
   for (auto [Info, PArgs] : zip_equal(Infos, PluginArgs)) {
