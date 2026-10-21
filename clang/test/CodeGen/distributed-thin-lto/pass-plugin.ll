@@ -3,7 +3,8 @@
 ; causing this test case to fail. XFAIL for now.
 ; XFAIL: system-aix
 
-;; Validate that -fpass-plugin works for distributed ThinLTO backends.
+;; Validate that -fpass-plugin and its arguments work for distributed ThinLTO
+;; backends.
 
 ; RUN: opt -thinlto-bc -o %t.o %s
 
@@ -15,6 +16,12 @@
 ; RUN:   -O2 -emit-obj -fthinlto-index=%t.o.thinlto.bc \
 ; RUN:   -fpass-plugin=%llvmshlibdir/Bye%pluginext \
 ; RUN:   -mllvm -wave-goodbye \
+; RUN:   -o %t.native.o -x ir %t.o 2>&1 | FileCheck %s
+
+; RUN: %clang_cc1 -triple x86_64-grtev4-linux-gnu \
+; RUN:   -O2 -emit-obj -fthinlto-index=%t.o.thinlto.bc \
+; RUN:   -fpass-plugin=%llvmshlibdir/Bye%pluginext \
+; RUN:   -fpass-plugin-arg=Bye,-wave-goodbye \
 ; RUN:   -o %t.native.o -x ir %t.o 2>&1 | FileCheck %s
 
 ; CHECK: Bye: main

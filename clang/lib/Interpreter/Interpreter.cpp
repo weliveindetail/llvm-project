@@ -354,6 +354,10 @@ Interpreter::Interpreter(std::unique_ptr<CompilerInstance> Instance,
 
   // Honor -mllvm options
   CI->parseLLVMArgs();
+  if (llvm::Error E = CI->passPluginArguments()) {
+    ErrOut = joinErrors(std::move(ErrOut), std::move(E));
+    return;
+  }
 
   Act = TSCtx->withContextDo([&](llvm::LLVMContext *Ctx) {
     return std::make_unique<IncrementalAction>(*CI, *Ctx, ErrOut, *this,

@@ -558,6 +558,10 @@ public:
   /// List of dynamic shared object files to be loaded as pass plugins.
   std::vector<std::string> PassPlugins;
 
+  /// "<plugin>,<arg>" entries, passed in order to the ParseArguments callback
+  /// of the pass plugin or linked extension named <plugin>.
+  std::vector<std::string> PassPluginArgs;
+
   /// List of pass builder callbacks.
   std::vector<std::function<void(llvm::PassBuilder &)>> PassBuilderCallbacks;
 

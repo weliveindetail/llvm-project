@@ -56,6 +56,7 @@
 #include "llvm/Support/CrashRecoveryContext.h"
 #include "llvm/Support/Errc.h"
 #include "llvm/Support/FileSystem.h"
+#include "llvm/Support/IOSandbox.h"
 #include "llvm/Support/MemoryBuffer.h"
 #include "llvm/Support/Path.h"
 #include "llvm/Support/Signals.h"
@@ -73,6 +74,10 @@
 #include <utility>
 
 using namespace clang;
+
+#define HANDLE_EXTENSION(Ext)                                                  \
+  llvm::PassPluginLibraryInfo get##Ext##PluginInfo();
+#include "llvm/Support/Extension.def"
 
 CompilerInstance::CompilerInstance(
     std::shared_ptr<CompilerInvocation> Invocation,
@@ -1148,6 +1153,26 @@ void CompilerInstance::parseLLVMArgs() {
                                       /*Overview=*/"", /*Errs=*/nullptr,
                                       /*VFS=*/&getVirtualFileSystem());
   }
+}
+
+llvm::Error CompilerInstance::passPluginArguments() {
+  // Only with arguments: two plugins with the same name are an error then.
+  const std::vector<std::string> &PassPluginArgs =
+      getCodeGenOpts().PassPluginArgs;
+  if (PassPluginArgs.empty())
+    return llvm::Error::success();
+  // A plugin that failed to load is reported already.
+  if (PassPlugins.size() != getCodeGenOpts().PassPlugins.size())
+    return llvm::Error::success();
+  SmallVector<llvm::PassPluginLibraryInfo, 0> Infos;
+  for (const std::unique_ptr<llvm::PassPlugin> &Plugin : PassPlugins)
+    Infos.push_back(Plugin->getInfo());
+#define HANDLE_EXTENSION(Ext) Infos.push_back(get##Ext##PluginInfo());
+#include "llvm/Support/Extension.def"
+  // ParseArguments has no VFS, so plugins that parse with cl use the real
+  // file system, e.g. to expand response files.
+  auto BypassSandbox = llvm::sys::sandbox::scopedDisable();
+  return llvm::passPluginArguments(Infos, PassPluginArgs);
 }
 
 /// Determine the appropriate source input kind based on language

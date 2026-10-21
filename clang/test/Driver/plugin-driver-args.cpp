@@ -21,7 +21,11 @@
 // RUN: %clang -fplugin=%llvmshlibdir/CallSuperAttr%pluginext -fplugin-arg-testname- -fsyntax-only %s -### 2>&1 | FileCheck %s --check-prefix=CHECK-NO-PLUGIN-ARG2
 // CHECK-NO-PLUGIN-ARG2: missing plugin argument for plugin testname in -fplugin-arg-testname-
 
+/// -fpass-plugin-arg= is forwarded as is, in order.
+// RUN: %clang -fpass-plugin=bar.so -fpass-plugin-arg=bar,-x -fpass-plugin-arg=bar,-y=1,2 -fsyntax-only %s -### 2>&1 | FileCheck %s --check-prefix=CHECK-PASS-PLUGIN-ARG
+// CHECK-PASS-PLUGIN-ARG: "-fpass-plugin=bar.so" "-fpass-plugin-arg=bar,-x" "-fpass-plugin-arg=bar,-y=1,2"
+
 // Plugins are only relevant for the -cc1 phase. No warning should be raised
 // when only using the assembler. See GH #88173.
-// RUN: %clang -c -fpass-plugin=bar.so -fplugin=bar.so -fplugin-arg-bar-option -Wunused-command-line-argument -x assembler %s -### 2>&1 | FileCheck %s --check-prefix=CHECK-PLUGIN-ASM
+// RUN: %clang -c -fpass-plugin=bar.so -fpass-plugin-arg=bar,-x -fplugin=bar.so -fplugin-arg-bar-option -Wunused-command-line-argument -x assembler %s -### 2>&1 | FileCheck %s --check-prefix=CHECK-PLUGIN-ASM
 // CHECK-PLUGIN-ASM-NOT: argument unused during compilation: '-f{{[a-z-]*plugin[^']*}}'

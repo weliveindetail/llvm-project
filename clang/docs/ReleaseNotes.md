@@ -302,6 +302,9 @@ features cannot lower the translation-unit ABI level;
 
 ### New Compiler Flags
 
+- New option `-fpass-plugin-arg=<plugin>,<arg>` passes `<arg>` to the pass
+  plugin named `<plugin>`, like `-plugin-arg=` in `opt` and `llc`.
+
 - New option `-fmodules-validate-directory-dependencies` makes an implicitly
   built module out of date when a header is added to a directory it enumerated,
   such as an umbrella directory or the directory of an umbrella header, after it

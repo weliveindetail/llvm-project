@@ -274,6 +274,11 @@ public:
   /// This should be called after plugins are loaded and before ExecuteAction.
   void parseLLVMArgs();
 
+  /// Pass the -fpass-plugin-arg arguments to the loaded pass plugins and the
+  /// linked extensions. Call it once, after LoadRequestedPlugins() and
+  /// parseLLVMArgs(), so that they take precedence over -mllvm options.
+  llvm::Error passPluginArguments();
+
   const llvm::cl::LibraryOptionsContext &getLibraryOptions() const {
     return LibraryOptions;
   }

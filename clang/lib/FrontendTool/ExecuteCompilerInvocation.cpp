@@ -263,6 +263,12 @@ bool ExecuteCompilerInvocation(CompilerInstance *Clang) {
 
   Clang->parseLLVMArgs();
 
+  if (llvm::Error E = Clang->passPluginArguments()) {
+    Clang->getDiagnostics().Report(diag::err_fe_pass_plugin_args)
+        << toString(std::move(E));
+    return false;
+  }
+
 #if CLANG_ENABLE_STATIC_ANALYZER
   // These should happen AFTER plugins have been loaded!
 
