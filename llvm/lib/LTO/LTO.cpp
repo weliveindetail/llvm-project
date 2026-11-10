@@ -192,6 +192,12 @@ std::string llvm::computeLTOCacheKey(
     AddUnsigned(-1);
   for (const auto &S : Conf.MllvmArgs)
     AddString(S);
+  // Pass-plugins affect optimization and codegen. Hashing in registration
+  // order gives the same bytes before and after LTO::run() loads them.
+  for (const std::string &Path : Conf.PassPluginFilenames)
+    AddString(Path);
+  for (const PassPlugin *Plugin : Conf.LoadedPassPlugins)
+    AddString(Plugin->getFilename());
   AddUnsigned(static_cast<int>(Conf.CGOptLevel));
   AddUnsigned(static_cast<int>(Conf.CGFileType));
   AddUnsigned(Conf.OptLevel);
