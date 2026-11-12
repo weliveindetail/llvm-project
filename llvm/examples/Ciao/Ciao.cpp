@@ -9,6 +9,9 @@
 #include "llvm/CodeGen/MachineFunctionPass.h"
 #include "llvm/CodeGen/Passes.h"
 #include "llvm/CodeGen/TargetPassConfig.h"
+#include "llvm/IR/LLVMContext.h"
+#include "llvm/IR/Module.h"
+#include "llvm/Passes/RunCodeGen.h"
 #include "llvm/Plugins/PassPlugin.h"
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/Target/RegisterTargetPassConfigCallback.h"
@@ -41,9 +44,35 @@ static RegisterTargetPassConfigCallback RegisterLegacyCiao{
       TPC->insertPass(&GCLoweringID, &LegacyCiao::ID);
     }};
 
-// We don't use the pass-plugin interface (yet), but -load-pass-plugin requires
-// the entry point.
+namespace {
+bool ForwardCodeGen = false;
+
+// Take over code generation and forward it to the default pipeline. Plugins
+// that run an LLVM-based pipeline of their own work this way.
+bool preCodeGenCallback(Module &M, TargetMachine &TM, CodeGenFileType CGFT,
+                        raw_pwrite_stream &OS) {
+  if (!ForwardCodeGen)
+    return false;
+  errs() << "Ciao: forwarding to runCodeGenPipeline\n";
+  // We took over code generation at this point, so errors don't fall back to
+  // the default pipeline. Bye covers the error with fallback case instead.
+  if (Error Err = runCodeGenPipeline(TM, M, OS, /*DwoOS=*/nullptr, CGFT))
+    M.getContext().emitError(toString(std::move(Err)));
+  return true;
+}
+
+Error parseArguments(ArrayRef<const char *> Args) {
+  for (StringRef Arg : Args)
+    if (Arg == "forward-codegen")
+      ForwardCodeGen = true;
+  return Error::success();
+}
+} // namespace
+
+// We use the pass-plugin for preCodeGenCallback and argument parsing. The
+// legacy codegen pipeline relies on the static initialization.
 extern "C" LLVM_ATTRIBUTE_WEAK ::llvm::PassPluginLibraryInfo
 llvmGetPassPluginInfo() {
-  return {LLVM_PLUGIN_API_VERSION, "Ciao", LLVM_VERSION_STRING};
+  return {LLVM_PLUGIN_API_VERSION, "Ciao", LLVM_VERSION_STRING, nullptr,
+          preCodeGenCallback, parseArguments};
 }
